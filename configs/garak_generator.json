@@ -1,0 +1,13 @@
+{
+  "generators": {
+    "rest": {
+      "RestGenerator": {
+        "uri": "http://localhost:8000/api/chat",
+        "req_template": "{\"prompt\": \"$INPUT\"}",
+        "response_json": true,
+        "response_json_field": "response",
+        "request_timeout": 20
+      }
+    }
+  }
+}
