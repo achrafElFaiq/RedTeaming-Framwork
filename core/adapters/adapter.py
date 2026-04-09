@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from core.entities.attack_target import AttackTarget
 
 
 class Adapter(ABC):
@@ -6,8 +7,6 @@ class Adapter(ABC):
     the adapter takes the target and implments a new method that return the correct object that the runner must use
     
     """
-    def __init__(self, target: AttackTarget):
-        self.target = target
     
     @abstractmethod
     def wrap(self) -> any:
