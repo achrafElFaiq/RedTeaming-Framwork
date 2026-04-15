@@ -4,16 +4,21 @@ from pathlib import Path
 from core.entities.attack_target import AttackTarget
 from core.runners.runner import Runner
 from core.attacks.attack import Attack
+from core.results.garak_normalizer import GarakNormalizer
+
+from datetime import datetime
+
 
 class GarakRunner(Runner):
     
     GARAK_REPORTS_DIR = Path.home() / ".local/share/garak/garak_runs/reports"
     CONFIG_PATH = Path("configs/garak_config.json")
 
+
     def run(self, target: AttackTarget, attack: Attack) -> int:
         self._write_generator_config(target)
         self.GARAK_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        
+        report_prefix = attack.config.get("report_prefix", "reports/run")
         result = subprocess.run(
             [
                 "python", "-m", "garak",
@@ -26,6 +31,27 @@ class GarakRunner(Runner):
             capture_output=False,
             text=True
         )
+
+        # normalize and save
+        # Garak puts the report in its own dir, extract just the stem
+        stem = Path(report_prefix).name  # "blank" from "reports/blank"
+        report_path = self.GARAK_REPORTS_DIR / f"{stem}.report.jsonl"
+
+        if report_path.exists():
+            normalizer = GarakNormalizer(
+                report_path=str(report_path),
+                target_url=target.url
+            )
+            attack_result = normalizer.normalize()
+            Path("reports").mkdir(exist_ok=True)
+            attack_result.save(
+                f"reports/garak_{attack.intent}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+            print(f"[GarakRunner] Report saved.")
+        else:
+            print(f"[GarakRunner] Report file not found at {report_path}")
+
+
         return result.returncode
 
     def _write_generator_config(self, target: AttackTarget) -> None:

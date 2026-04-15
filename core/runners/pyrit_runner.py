@@ -1,17 +1,30 @@
+# 1. Standard Python Libraries
 import asyncio
-from pyrit.executor.attack.multi_turn.red_teaming import RedTeamingAttack
-from pyrit.executor.attack.core.attack_config import AttackAdversarialConfig
+from pathlib import Path
+from datetime import datetime
+
+# 2. Third-Party Libraries (PyRIT)
+from pyrit.executor.attack import (
+    AttackAdversarialConfig,
+    AttackScoringConfig,
+    ConsoleAttackResultPrinter,
+    RedTeamingAttack,
+)
 from pyrit.prompt_target.openai.openai_chat_target import OpenAIChatTarget
+from pyrit.memory.central_memory import CentralMemory
+from pyrit.memory.sqlite_memory import SQLiteMemory
+from pyrit.score.true_false.self_ask_true_false_scorer import SelfAskTrueFalseScorer
+
+# 3. Internal/Custom Modules (Your Core logic)
 from core.entities.attack_target import AttackTarget
 from core.attacks.attack import Attack
 from core.runners.runner import Runner
 from core.adapters.pyrit_adapter import PyritAdapter
-from pyrit.memory.central_memory import CentralMemory
-from pyrit.memory.sqlite_memory import SQLiteMemory
-from pyrit.executor.attack.core.attack_config import AttackAdversarialConfig, AttackScoringConfig
-from pyrit.score.true_false.self_ask_true_false_scorer import SelfAskTrueFalseScorer
 
 class PyritRunner(Runner):
+
+
+    DB_PATH = str(Path.home() / "Library/Application Support/dbdata/pyrit.db")
 
     def run(self, target: AttackTarget, attack: Attack) -> any:
         CentralMemory.set_memory_instance(SQLiteMemory())
@@ -22,6 +35,23 @@ class PyritRunner(Runner):
 
         print("[PyritRunner] Wrapping target with PyRIT adapter...")
         objective_target = PyritAdapter().wrap(target)
+
+
+        # --- DEBUG CAPABILITIES ---
+        print("\n" + "="*40)
+        print("🔍 VERIFICATION TECHNIQUE")
+
+        # 1. Vérifie la propriété publique
+        print(f"Propriété .supports_multi_turn : {objective_target.supports_multi_turn}")
+
+        # 2. Vérifie l'objet interne que PyRIT utilise pour la DB
+        # PyRIT range le contenu de 'custom_capabilities' dans '_capabilities'
+        caps = getattr(objective_target, '_capabilities', None)
+        if caps:
+            print(f"Capacité interne détectée : True (Multi-turn: {caps.supports_multi_turn})")
+        else:
+            print("❌ L'objet n'a pas chargé les capabilities !")
+        print("="*40 + "\n")
 
         print("[PyritRunner] Setting up attacker LLM and scoring configuration...")
         attacker_llm = OpenAIChatTarget(
@@ -65,7 +95,26 @@ class PyritRunner(Runner):
         result = await red_team.execute_async(
             objective=attack.config.get("objective")
         )
-        
+
+        #await ConsoleAttackResultPrinter().print_result_async(result=result, include_auxiliary_scores=True)
+        """
         print("[PyritRunner] Attack execution completed. Result:")
+        print("main:", result.conversation_id)
+        print("active:", result.get_active_conversation_ids())
+        print("all:", result.get_all_conversation_ids())
+        """
+
+        # normalize and save
+        from core.results.pyrit_normalizer import PyritNormalizer
+        normalizer = PyritNormalizer(
+            pyrit_result=result,
+            db_path=self.DB_PATH,
+            target_url=target.url,
+            attack_name=attack.name
+        )
+        attack_result = normalizer.normalize()
+        Path("reports").mkdir(exist_ok=True)
+        attack_result.save(f"reports/pyrit_{attack.intent}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        print(f"[PyritRunner] Report saved.")
 
         return result

@@ -8,6 +8,7 @@ __pycache__/
 venv/
 ENV/
 env/
+.venv313/
 
 # Editor files
 .DS_Store
@@ -19,3 +20,7 @@ env/
 
 # Local test artifacts
 test.json
+
+# Report folder
+reports/
+
