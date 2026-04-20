@@ -95,7 +95,7 @@ class PyritNormalizer(Normalizer):
             turn_number += 1
 
         conn.close()
-
+        self._clear_db()
         conversation = Conversation(
             conversation_id=self.pyrit_result.conversation_id,
             objective=self.pyrit_result.objective,
@@ -113,7 +113,7 @@ class PyritNormalizer(Normalizer):
         
     def _build_empty_result(self) -> AttackResult:
         # Méthode utilitaire pour générer un résultat vide proprement
-        return AttackResult(
+        result = AttackResult(
             framework="pyrit",
             attack_name=self.attack_name,
             target_url=self.target_url,
@@ -125,3 +125,21 @@ class PyritNormalizer(Normalizer):
                 turns=[]
             )
         )
+        self._clear_db()
+        return result
+    
+
+    def _clear_db(self):
+        print("[PyritNormaliser] Nettoyage de la base de données.")
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM PromptMemoryEntries")
+            cursor.execute("DELETE FROM ScoreEntries")
+            cursor.execute("DELETE FROM AttackResultEntries")
+            conn.commit()
+            print("[PyritNormaliser] Tables vidées avec succès.")
+        except Exception as e:
+            print(f"[PyritNormaliser] Erreur lors du nettoyage : {e}")
+        finally:
+            conn.close()

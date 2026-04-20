@@ -9,7 +9,9 @@ from pyrit.executor.attack import (
     AttackScoringConfig,
     ConsoleAttackResultPrinter,
     RedTeamingAttack,
+    CrescendoAttack,
 )
+
 from pyrit.prompt_target.openai.openai_chat_target import OpenAIChatTarget
 from pyrit.memory.central_memory import CentralMemory
 from pyrit.memory.sqlite_memory import SQLiteMemory
@@ -50,7 +52,7 @@ class PyritRunner(Runner):
         if caps:
             print(f"Capacité interne détectée : True (Multi-turn: {caps.supports_multi_turn})")
         else:
-            print("❌ L'objet n'a pas chargé les capabilities !")
+            print(" L'objet n'a pas chargé les capabilities !")
         print("="*40 + "\n")
 
         print("[PyritRunner] Setting up attacker LLM and scoring configuration...")
@@ -62,11 +64,7 @@ class PyritRunner(Runner):
         )
 
 
-        print("[PyritRunner] Configuring adversarial attack and scorer...")
-        adversarial_config = AttackAdversarialConfig(
-            target=attacker_llm,
-            system_prompt_path=attack.config.get("strategy_path", None),
-        )
+        
 
         print("[PyritRunner] Initializing scorer...")
 
@@ -75,26 +73,16 @@ class PyritRunner(Runner):
             chat_target=attacker_llm,
             true_false_question=attack.config.get("scoring_question"),
         )
+        
 
-        print("[PyritRunner] Setting up attack scoring configuration...")
-        scoring_config = AttackScoringConfig(
-            objective_scorer=scorer
-        )
+        orchestrator_type = attack.config.get("orchestrator", "red_teaming")
 
-        print("[PyritRunner] Initializing Red Teaming attack...")
-
-        red_team = RedTeamingAttack(
-            objective_target=objective_target,
-            attack_adversarial_config=adversarial_config,
-            attack_scoring_config=scoring_config,
-            max_turns=attack.config.get("max_turns", 5),
-        )
-
-        print("[PyritRunner] Executing Red Teaming attack...")
-
-        result = await red_team.execute_async(
-            objective=attack.config.get("objective")
-        )
+        if orchestrator_type == "red_teaming":
+            result = await self._run_red_teaming(attack, objective_target, attacker_llm, scorer)
+        elif orchestrator_type == "crescendo":
+            result = await self._run_crescendo(attack, objective_target, attacker_llm, scorer)
+        else:
+            raise ValueError(f"Unknown orchestrator type: {orchestrator_type}")
 
         #await ConsoleAttackResultPrinter().print_result_async(result=result, include_auxiliary_scores=True)
         """
@@ -118,3 +106,37 @@ class PyritRunner(Runner):
         print(f"[PyritRunner] Report saved.")
 
         return result
+    
+
+    async def _run_red_teaming(self, attack, objective_target, attacker_llm, scorer):
+        """Ton orchestrateur existant — inchangé."""
+        adversarial_config = AttackAdversarialConfig(
+            target=attacker_llm,
+            system_prompt_path=attack.config.get("strategy_path", None),
+        )
+        scoring_config = AttackScoringConfig(objective_scorer=scorer)
+        red_team = RedTeamingAttack(
+            objective_target=objective_target,
+            attack_adversarial_config=adversarial_config,
+            attack_scoring_config=scoring_config,
+            max_turns=attack.config.get("max_turns", 5),
+        )
+        return await red_team.execute_async(objective=attack.config.get("objective"))
+
+
+    async def _run_crescendo(self, attack, objective_target, attacker_llm, scorer):
+        adversarial_config = AttackAdversarialConfig(
+            target=attacker_llm,
+            system_prompt_path=attack.config.get("strategy_path", None),
+        )
+        scoring_config = AttackScoringConfig(objective_scorer=scorer)
+        
+        crescendo = CrescendoAttack(
+            objective_target=objective_target,
+            attack_adversarial_config=adversarial_config,
+            attack_scoring_config=scoring_config,
+            max_turns=attack.config.get("max_turns", 6),
+        )
+        return await crescendo.execute_async(
+            objective=attack.config.get("objective")
+        )
