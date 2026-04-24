@@ -33,10 +33,10 @@ class AttackResult(BaseModel):
     attack_name: str
     target_url: str
     timestamp: datetime = datetime.now()
-    
+
     # garak — flat list of independent prompts
     prompts: Optional[list[PromptResult]] = None
-    
+
     # pyrit — one single conversation
     conversation: Optional[Conversation] = None
 

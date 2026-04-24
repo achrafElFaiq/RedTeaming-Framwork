@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from core.entities.attack_target import AttackTarget
+from core.models.attack_result import AttackResult
+from core.models.attack_target import AttackTarget
 
-class Attack(ABC): 
+class Attack(ABC):
     def __init__(self, intent: str, framework: str, config: dict = None):
         self.intent = intent
         self.framework = framework
@@ -9,5 +10,5 @@ class Attack(ABC):
         self.name = f"{self.framework} - {self.intent}"
 
     @abstractmethod
-    def execute(self, target: AttackTarget):
+    def execute(self, target: AttackTarget) -> list[AttackResult]:
         pass

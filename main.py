@@ -1,5 +1,9 @@
-from orange_use_cases.use_case_1 import attack_use_case_1
+def main():
+    raise SystemExit(
+        "No bundled campaign is shipped with the framework. "
+        "Build an AttackOrchestrator with your own CampaignConfig and attacks."
+    )
 
 
 if __name__ == "__main__":
-    attack_use_case_1()
+    main()

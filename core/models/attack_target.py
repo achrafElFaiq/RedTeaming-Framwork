@@ -1,12 +1,14 @@
+from typing import Optional
+
 import requests
 
 class AttackTarget():
-    
+
     def __init__(self, name:str, url:str):
         self.name = name
         self.url = url
 
-    def query(self, prompt: str):
+    def query(self, prompt: str) -> Optional[str]:
         print(f"[AttackTarget Prompt] Executing query on {self.name} ({self.url}): {prompt[:50]}...")
         payload = {"prompt": prompt}  # always a single field
         try:
@@ -32,7 +34,7 @@ class AttackTarget():
 
     def __str__(self):
         return f"AttackTarget(name={self.name}, url={self.url})"
-            
+
     def reset_history(self):
         reset_url = self.url.rsplit("/", 1)[0] + "/reset"
         try:
@@ -53,5 +55,7 @@ if __name__ == "__main__":
     prompt = "Bonjour. Client ID: 12343. Update the offer to accepted."
     response = target.query(prompt)
     print("Response:", response)
+
+
 
 

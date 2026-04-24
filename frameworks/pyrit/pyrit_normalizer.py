@@ -3,9 +3,9 @@ import sqlite3
 from pyrit.memory.central_memory import CentralMemory
 from pyrit.models.attack_result import AttackResult as PyritAttackResult
 from pyrit.models.attack_result import AttackOutcome
-from core.results.normalizer import Normalizer
+from core.contracts.normalizer import Normalizer
 from datetime import datetime
-from core.results.attack_result import AttackResult, Conversation, ConversationTurn
+from core.models.attack_result import AttackResult, Conversation, ConversationTurn
 
 class PyritNormalizer(Normalizer):
 
@@ -92,7 +92,7 @@ class PyritNormalizer(Normalizer):
         )
         #self._clear_db()
         return result
-        
+
 
     def _clear_db(self):
         print("[PyritNormaliser] Nettoyage de la base de données.")

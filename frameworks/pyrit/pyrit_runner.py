@@ -2,6 +2,7 @@
 import asyncio
 from pathlib import Path
 from datetime import datetime
+from typing import Any
 
 # 2. Third-Party Libraries (PyRIT)
 from pyrit.executor.attack import (
@@ -30,17 +31,18 @@ from pyrit.memory.sqlite_memory import SQLiteMemory
 from pyrit.score.true_false.self_ask_true_false_scorer import SelfAskTrueFalseScorer
 
 # 3. Internal/Custom Modules (Your Core logic)
-from core.entities.attack_target import AttackTarget
-from core.attacks.attack import Attack
-from core.runners.runner import Runner
-from core.adapters.pyrit_adapter import PyritAdapter
+from core.models.attack_target import AttackTarget
+from core.models.attack import Attack
+from core.models.attack_result import AttackResult
+from core.contracts.runner import Runner
+from .pyrit_adapter import PyritAdapter
 
 class PyritRunner(Runner):
 
 
     DB_PATH = str(Path.home() / "Library/Application Support/dbdata/pyrit.db")
 
-    def run(self, target: AttackTarget, attack: Attack) -> any:
+    def run(self, target: AttackTarget, attack: Attack) -> list[AttackResult]:
         CentralMemory.set_memory_instance(SQLiteMemory())
 
         loop = asyncio.new_event_loop()
@@ -51,7 +53,7 @@ class PyritRunner(Runner):
             loop.run_until_complete(asyncio.sleep(0.3))
             loop.close()
 
-    async def _run_async(self, target: AttackTarget, attack: Attack) -> any:
+    async def _run_async(self, target: AttackTarget, attack: Attack) -> Any:
 
         print("\n" + "="*40)
         print(f"[PyritRunner] Starting PyRIT attack '{attack.name}' execution...")
@@ -129,8 +131,10 @@ class PyritRunner(Runner):
 
         # normalize and save
         print("[PyritRunner] Normalizing and saving results...")
-        from core.results.pyrit_normalizer import PyritNormalizer
+        from .pyrit_normalizer import PyritNormalizer
         from pyrit.executor.attack.core.attack_executor import AttackExecutorResult
+
+        normalized_results: list[AttackResult] = []
 
         if isinstance(result, AttackExecutorResult):
             print(f"[PyritRunner] Dataset result: {len(result.completed_results)} completed, "
@@ -151,6 +155,7 @@ class PyritRunner(Runner):
                     attack_name=unique_attack_name,  # ← nom unique ici
                 )
                 attack_result = normalizer.normalize()
+                normalized_results.append(attack_result)
                 Path("reports").mkdir(exist_ok=True)
 
                 prompt_slug = slugify(individual_result.objective)[:40]
@@ -169,6 +174,7 @@ class PyritRunner(Runner):
                 attack_name=attack.name,
             )
             attack_result = normalizer.normalize()
+            normalized_results.append(attack_result)
             Path("reports").mkdir(exist_ok=True)
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -183,8 +189,8 @@ class PyritRunner(Runner):
         print(f"[PyritRunner] Reseting target memory. Done")
 
         print(f"[PyritRunner] Attack execution finished. Returning result.")
-        return result
-    
+        return normalized_results
+
 
     async def _run_red_teaming(self, attack, objective_target, attacker_llm, scorer):
         """Ton orchestrateur existant — inchangé."""
@@ -208,7 +214,7 @@ class PyritRunner(Runner):
             system_prompt_path=attack.config.get("strategy_path", None),
         )
         scoring_config = AttackScoringConfig(objective_scorer=scorer)
-        
+
         crescendo = CrescendoAttack(
             objective_target=objective_target,
             attack_adversarial_config=adversarial_config,

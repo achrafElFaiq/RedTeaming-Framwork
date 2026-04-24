@@ -1,8 +1,8 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from core.results.normalizer import Normalizer
-from core.results.attack_result import AttackResult, PromptResult
+from core.contracts.normalizer import Normalizer
+from core.models.attack_result import AttackResult, PromptResult
 
 class GarakNormalizer(Normalizer):
 
