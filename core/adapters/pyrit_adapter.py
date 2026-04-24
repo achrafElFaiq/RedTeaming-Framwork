@@ -31,17 +31,20 @@ class PyritAdapter(Adapter):
                 return True
 
             async def send_prompt_async(self, *, message: Message) -> list[Message]:
-                # extract prompt text from incoming message
-                prompt = message.message_pieces[0].converted_value
+                # Extract the incoming user piece
+                user_piece = message.message_pieces[0]
+                prompt = user_piece.converted_value
 
-                # call your SIA
+                # Call the SIA
                 response = target.query(prompt) or ""
 
-                # wrap response back into PyRIT format
+                # Wrap response — MUST inherit conversation_id and sequence from the user piece
                 response_piece = MessagePiece(
                     role="assistant",
                     original_value=response,
                     converted_value=response,
+                    conversation_id=user_piece.conversation_id,  # ← lien principal
+                    sequence=user_piece.sequence + 1,  # ← PyRIT utilise sequence pour get_request_from_response
                 )
                 return [Message(message_pieces=[response_piece])]
 

@@ -32,6 +32,11 @@ class GarakRunner(Runner):
             text=True
         )
 
+
+        print(f"[GarakRunner] Reseting target memory.")
+        target.reset_history()
+        print(f"[GarakRunner] Reseting target memory. Done")
+
         # normalize and save
         # Garak puts the report in its own dir, extract just the stem
         stem = Path(report_prefix).name  # "blank" from "reports/blank"
