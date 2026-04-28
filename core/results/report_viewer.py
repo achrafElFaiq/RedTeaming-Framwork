@@ -1,13 +1,8 @@
 """
 RedTrace — Red Teaming Dashboard
 =================================
-Streamlit dashboard that provides deep visibility into attack campaigns.
-
-Sections
---------
-1. Overview   — KPIs, breach-rate gauge, framework split, timeline
-2. Attacks    — filterable list with conversation / probe drill-down
-3. Analysis   — turn-level heatmap, technique comparison, scorer insights
+Three tabs: Overview · Campaigns · Attacks
+Light warm minimal theme.
 
 Launch:  streamlit run core/results/report_viewer.py
 """
@@ -15,792 +10,552 @@ Launch:  streamlit run core/results/report_viewer.py
 import json
 import html
 import os
+import re
 import sys
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
-# ── Project root on sys.path so `config` is importable ──────────
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import get_runtime_settings
 
-# ─────────────────────────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="RedTrace — Attack Dashboard",
-    page_icon="🔴",
+    page_title="Trace attacks",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+_ACCENT = ["#C0392B", "#2563EB", "#D97706", "#059669", "#7C3AED", "#6B7280"]
+
 # ─────────────────────────────────────────────────────────────────
-# Global CSS
+# CSS
 # ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-html, body, [data-testid="stApp"] {
-    background-color: #0e1117; color: #c9d1d9;
-    font-family: 'Inter', sans-serif;
+html, body, .stApp, [data-testid="stApp"] {
+    background: #F5F4F0 !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #111111;
 }
-[data-testid="stHeader"], [data-testid="stToolbar"] {
-    background-color: #0e1117 !important;
+[data-testid="stHeader"]  { background: #F5F4F0 !important; border-bottom: 1px solid #E5E3DE; }
+[data-testid="stToolbar"] { background: #F5F4F0 !important; }
+#MainMenu, footer, [data-testid="stDecoration"] { display: none !important; }
+
+section[data-testid="stSidebar"] {
+    background: #FFFFFF !important;
+    border-right: 1px solid #E5E3DE !important;
+    padding-top: 0 !important;
 }
-[data-testid="stSidebar"] {
-    background-color: #161b22 !important; border-right: 1px solid #30363d;
+section[data-testid="stSidebar"] > div { padding: 24px 20px; }
+section[data-testid="stSidebar"] * { color: #555 !important; }
+section[data-testid="stSidebar"] label { color: #111 !important; font-weight: 500; font-size: 13px; }
+section[data-testid="stSidebar"] hr { border-color: #F0EEEA; }
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; background: transparent;
+    border-bottom: 1px solid #E5E3DE; padding-bottom: 0;
 }
-[data-testid="stSidebar"] * { color: #8b949e !important; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3, [data-testid="stSidebar"] label {
-    color: #c9d1d9 !important;
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important; border: none !important;
+    color: #888 !important; font-weight: 500; font-size: 14px;
+    padding: 10px 18px; border-radius: 0;
+    border-bottom: 2px solid transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #111 !important; border-bottom: 2px solid #111 !important;
+    background: transparent !important;
 }
 [data-testid="stExpander"] {
-    background-color: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    background: #FFFFFF !important; border: 1px solid #E5E3DE !important;
+    border-radius: 10px !important; overflow: hidden;
 }
-
-/* ── KPI cards ────────────────────────────────────────────── */
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.kpi {
-    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-    padding: 16px 20px; border-top: 3px solid;
+[data-testid="stExpander"] summary {
+    font-size: 13px; font-weight: 500; color: #666 !important; padding: 14px 18px;
 }
-.kpi.blue   { border-top-color: #58a6ff; }
-.kpi.red    { border-top-color: #f85149; }
-.kpi.green  { border-top-color: #3fb950; }
-.kpi.orange { border-top-color: #d29922; }
-.kpi.purple { border-top-color: #bc8cff; }
-.kpi .label {
-    font-size: 10px; color: #8b949e; text-transform: uppercase;
-    letter-spacing: 1.2px; font-family: 'JetBrains Mono', monospace; margin-bottom: 6px;
-}
-.kpi .value { font-size: 28px; font-weight: 700; color: #f0f6fc; line-height: 1; }
-.kpi .sub   { font-size: 11px; color: #484f58; font-family: 'JetBrains Mono', monospace; margin-top: 6px; }
-
-/* ── Breach gauge ─────────────────────────────────────────── */
-.gauge-container { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
-.gauge-bar {
-    flex: 1; height: 14px; background: #21262d; border-radius: 7px; overflow: hidden;
-    border: 1px solid #30363d;
-}
-.gauge-fill { height: 100%; border-radius: 7px; transition: width .5s ease; }
-.gauge-label {
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    font-weight: 600; min-width: 56px; text-align: right;
-}
-
-/* ── Attack cards ─────────────────────────────────────────── */
-.attack-card {
-    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-    margin-bottom: 10px; overflow: hidden;
-}
-.attack-card.breached { border-left: 4px solid #f85149; }
-.attack-card.hardened { border-left: 4px solid #3fb950; }
-.attack-header {
-    display: flex; align-items: center; gap: 12px; padding: 14px 18px; flex-wrap: wrap;
-}
-.fw-badge {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
-    padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
-}
-.fw-pyrit  { background: #1c2333; color: #79c0ff; border: 1px solid #388bfd44; }
-.fw-garak  { background: #0d1f0d; color: #56d364; border: 1px solid #3fb95044; }
-.outcome-badge {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
-    padding: 3px 9px; border-radius: 4px;
-}
-.outcome-breached { background: #3d1114; color: #f85149; border: 1px solid #f8514944; }
-.outcome-hardened { background: #0d2818; color: #3fb950; border: 1px solid #3fb95044; }
-.attack-name {
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c9d1d9; flex: 1;
-}
-.attack-meta {
-    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #484f58;
-}
-
-/* ── Objective ────────────────────────────────────────────── */
-.objective-box {
-    background: #1c2333; border: 1px solid #388bfd44; border-left: 3px solid #58a6ff;
-    border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #79c0ff; line-height: 1.6;
-}
-.obj-label {
-    font-size: 9px; color: #58a6ff; text-transform: uppercase;
-    letter-spacing: 1.5px; font-weight: 600; margin-bottom: 6px;
-}
-
-/* ── Conversation turns ───────────────────────────────────── */
-.turn-block { margin-bottom: 16px; }
-.turn-header {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #484f58; margin-bottom: 6px;
-}
-.msg {
-    border-radius: 8px; padding: 12px 14px; margin-bottom: 4px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    line-height: 1.65; white-space: pre-wrap; word-break: break-word;
-}
-.msg-label {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 1px;
-    font-weight: 600; margin-bottom: 5px;
-}
-.msg-attacker { background: #1c1633; border: 1px solid #6e40c966; color: #d2a8ff; }
-.msg-attacker .msg-label { color: #bc8cff; }
-.msg-target   { background: #0d2818; border: 1px solid #3fb95044; color: #aff5b4; }
-.msg-target .msg-label { color: #56d364; }
-.msg-empty    { color: #484f58; font-style: italic; }
-
-/* ── Score chips ──────────────────────────────────────────── */
-.score-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; }
-.score-chip {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
-    padding: 3px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
-}
-.chip-leaked { background: #3d1114; color: #f85149; border: 1px solid #f8514944; }
-.chip-safe   { background: #0d2818; color: #3fb950; border: 1px solid #3fb95044; }
-.chip-nodata { background: #21262d; color: #484f58; border: 1px solid #30363d; }
-.rationale {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #8b949e;
-    font-style: italic; line-height: 1.5;
-}
-.summary-line {
-    font-family: 'JetBrains Mono', monospace; font-size: 11px;
-    padding: 10px 0 2px 0; border-top: 1px solid #21262d; margin-top: 14px;
-}
-
-/* ── Garak probes ─────────────────────────────────────────── */
-.garak-probe {
-    border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 8px;
-    background: #161b22;
-}
-.garak-probe.fail { border-left: 3px solid #f85149; }
-.garak-probe.pass { border-left: 3px solid #3fb950; }
-.probe-status {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; margin-bottom: 8px;
-}
-.probe-status.fail { color: #f85149; }
-.probe-status.pass { color: #3fb950; }
-.field-label {
-    font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #484f58;
-    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; font-weight: 600;
-}
-.field-value {
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c9d1d9;
-    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-}
-
-/* ── Analysis cards ───────────────────────────────────────── */
-.analysis-card {
-    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-    padding: 20px; margin-bottom: 16px;
-}
-.analysis-title {
-    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b949e;
-    text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; margin-bottom: 14px;
-}
-.stat-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 6px 0; border-bottom: 1px solid #21262d;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-}
-.stat-label { color: #8b949e; }
-.stat-value { color: #f0f6fc; font-weight: 600; }
-.bar-track { flex: 1; height: 6px; background: #21262d; border-radius: 3px; margin: 0 12px; }
-.bar-fill  { height: 100%; border-radius: 3px; }
-
-.empty {
-    text-align: center; padding: 60px; color: #484f58;
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D8D5CE; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ═════════════════════════════════════════════════════════════════
-# Data helpers
-# ═════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────
+
+def e(v) -> str:
+    return html.escape(str(v)) if v else ""
+
 
 def load_reports(reports_path: Path) -> list[dict]:
-    """Load all JSON report files, newest first."""
-    files = sorted(
-        [f for f in os.listdir(reports_path) if f.endswith(".json")],
-        reverse=True,
-    )
-    reports = []
-    for filename in files:
+    out = []
+    for fn in sorted(os.listdir(reports_path), reverse=True):
+        if not fn.endswith(".json"):
+            continue
         try:
-            with open(reports_path / filename, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-                data["_filename"] = filename
-                reports.append(data)
+            with open(reports_path / fn, encoding="utf-8") as fh:
+                d = json.load(fh)
+                d["_filename"] = fn
+                out.append(d)
         except Exception:
             pass
-    return reports
+    return out
 
 
 def is_breached(r: dict) -> bool:
     conv = r.get("conversation")
-    if conv:
-        return conv.get("achieved", False)
-    prompts = r.get("prompts") or []
-    return any(not p.get("passed", True) for p in prompts)
-
-
-def e(text) -> str:
-    """HTML-escape helper."""
-    return html.escape(str(text)) if text else ""
+    if conv and isinstance(conv, dict):
+        return bool(conv.get("achieved", False))
+    for p in r.get("prompts") or []:
+        if not p.get("passed", True):
+            return True
+    return False
 
 
 def parse_ts(r: dict) -> datetime | None:
     raw = r.get("timestamp", "")
-    if not raw:
-        return None
     try:
-        return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(raw) if raw else None
     except Exception:
         return None
 
 
-# ═════════════════════════════════════════════════════════════════
-# KPIs
-# ═════════════════════════════════════════════════════════════════
+def group_by_campaign(reports: list[dict]) -> dict[str, list[dict]]:
+    g: dict[str, list[dict]] = {}
+    for r in reports:
+        g.setdefault(r.get("campaign_name") or "Uncategorized", []).append(r)
+    return g
 
-def compute_kpis(reports: list[dict]) -> dict:
+
+def campaign_color(idx: int) -> str:
+    return _ACCENT[idx % len(_ACCENT)]
+
+
+# ─────────────────────────────────────────────────────────────────
+# HTML primitives
+# ─────────────────────────────────────────────────────────────────
+
+def badge(text: str, bg: str, color: str) -> str:
+    return (
+        f'<span style="background:{bg};color:{color};font-size:11px;font-weight:600;'
+        f'padding:3px 10px;border-radius:6px;display:inline-block;letter-spacing:0.01em">'
+        f'{e(text)}</span>'
+    )
+
+
+def engine_badge(fw: str) -> str:
+    return badge("PYRIT", "#EEF2FF", "#3730A3") if fw == "pyrit" else badge("GARAK", "#F5F3FF", "#6D28D9")
+
+
+def outcome_badge(breached: bool) -> str:
+    return badge("BREACHED", "#FEF2F2", "#B91C1C") if breached else badge("RESISTED", "#F0FDF4", "#15803D")
+
+
+def dot(color: str) -> str:
+    return (
+        f'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+        f'background:{color};margin:0 3px;vertical-align:middle;flex-shrink:0"></span>'
+    )
+
+
+def kpi_card(label: str, value, sub: str = "", value_color: str = "#111") -> str:
+    sub_html = f'<div style="font-size:12px;color:#888;margin-top:5px;line-height:1.4">{sub}</div>' if sub else ""
+    return (
+        f'<div style="background:#FFFFFF;border:1px solid #E5E3DE;border-radius:12px;padding:22px 24px">'
+        f'<div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.08em;font-weight:600">{label}</div>'
+        f'<div style="font-size:30px;font-weight:700;color:{value_color};margin-top:6px;line-height:1">{value}</div>'
+        f'{sub_html}</div>'
+    )
+
+
+def breach_bar_html(rate: int) -> str:
+    bar_c = "#B91C1C" if rate >= 75 else ("#D97706" if rate >= 50 else ("#2563EB" if rate >= 25 else "#059669"))
+    return (
+        f'<div style="display:flex;align-items:center;gap:14px;margin:16px 0 4px">'
+        f'<span style="font-size:15px;font-weight:700;color:{bar_c};min-width:44px">{rate}%</span>'
+        f'<div style="flex:1;height:6px;background:#E5E3DE;border-radius:3px;overflow:hidden">'
+        f'<div style="width:{rate}%;height:100%;background:{bar_c};border-radius:3px"></div></div>'
+        f'<span style="font-size:12px;color:#999;min-width:80px">breach rate</span></div>'
+    )
+
+
+def section_label(text: str) -> str:
+    return (
+        f'<div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.08em;'
+        f'font-weight:600;margin:28px 0 14px">{text}</div>'
+    )
+
+
+def highlight_leaks(text: str) -> str:
+    t = e(text)
+    patterns = [
+        r'(\b(?:score|scoring|priorit[ée]|remise|r[ée]f[ée]rence|discount|priority|eligible?|eligibility|rang|rank)\b[\s\w]*?)\s*[:=]\s*(\d[\d\s,\.]*%?)',
+        r'(\b\w+)\s*:\s*(\d{1,3}(?:[.,]\d+)+%?)',
+    ]
+    hl = 'background:#FEF2F2;color:#B91C1C;padding:1px 6px;border-radius:4px;font-weight:600;border:1px solid rgba(185,28,28,.15)'
+    for pat in patterns:
+        t = re.sub(pat, lambda m: f'<mark style="{hl}">{m.group(0)}</mark>', t, flags=re.IGNORECASE)
+    return t
+
+
+def campaign_stats(reports: list[dict]) -> dict:
     total = len(reports)
     breached = sum(1 for r in reports if is_breached(r))
-    hardened = total - breached
+    resisted = total - breached
     rate = round(breached / total * 100) if total else 0
-
-    total_turns = 0
-    leaked_turns = 0
+    pyrit_n = sum(1 for r in reports if r.get("framework") == "pyrit")
+    garak_n = total - pyrit_n
+    turns = leaked = probes = failed_probes = 0
     for r in reports:
         conv = r.get("conversation")
-        if conv:
-            turns = conv.get("turns", [])
-            total_turns += len(turns)
-            leaked_turns += sum(1 for t in turns if t.get("score"))
+        if conv and isinstance(conv, dict):
+            t_list = conv.get("turns", [])
+            turns += len(t_list)
+            leaked += sum(1 for t in t_list if t.get("score"))
+        for p in r.get("prompts") or []:
+            probes += 1
+            if not p.get("passed", True):
+                failed_probes += 1
+    pyrit_convs = [r for r in reports if r.get("framework") == "pyrit" and isinstance(r.get("conversation"), dict)]
+    avg_depth = round(
+        sum(len(r["conversation"].get("turns", [])) for r in pyrit_convs) / len(pyrit_convs), 1
+    ) if pyrit_convs else 0
+    return dict(total=total, breached=breached, resisted=resisted, rate=rate,
+                pyrit=pyrit_n, garak=garak_n, turns=turns, leaked=leaked,
+                avg_depth=avg_depth, probes=probes, failed_probes=failed_probes)
 
-    total_probes = 0
-    failed_probes = 0
-    for r in reports:
-        prompts = r.get("prompts") or []
-        total_probes += len(prompts)
-        failed_probes += sum(1 for p in prompts if not p.get("passed", True))
 
-    pyrit_count = sum(1 for r in reports if r.get("framework") == "pyrit")
-    garak_count = sum(1 for r in reports if r.get("framework") == "garak")
+# ─────────────────────────────────────────────────────────────────
+# Sidebar
+# ─────────────────────────────────────────────────────────────────
 
-    pyrit_convs = [r for r in reports if r.get("framework") == "pyrit" and r.get("conversation")]
+def build_sidebar(reports: list[dict], campaigns: dict[str, list[dict]]) -> tuple[list[dict], str | None]:
+    with st.sidebar:
+        st.markdown(
+            '<div style="display:flex;align-items:center;gap:10px;padding:8px 0 28px">'
+            '<div style="width:10px;height:10px;border-radius:50%;background:#C0392B;flex-shrink:0"></div>'
+            '<span style="font-size:17px;font-weight:700;color:#111 !important;letter-spacing:-0.01em">Dashboard</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        sel = st.selectbox("Campaign", ["All Campaigns"] + sorted(campaigns.keys()))
+
+        st.markdown("---")
+        st.markdown('<p style="font-size:12px;font-weight:600;color:#333 !important;margin-bottom:6px">Framework</p>', unsafe_allow_html=True)
+        show_pyrit  = st.checkbox("PyRIT",  value=True)
+        show_garak  = st.checkbox("Garak",  value=True)
+
+        st.markdown("---")
+        st.markdown('<p style="font-size:12px;font-weight:600;color:#333 !important;margin-bottom:6px">Outcome</p>', unsafe_allow_html=True)
+        show_breached = st.checkbox("Breached", value=True)
+        show_resisted = st.checkbox("Resisted", value=True)
+
+        st.markdown("---")
+        st.markdown(
+            f'<p style="font-size:11px;color:#CCC !important;margin-top:4px">'
+            f'{len(reports)} reports · {len(campaigns)} campaign(s)</p>',
+            unsafe_allow_html=True,
+        )
+
+    sel_campaign = None if sel == "All Campaigns" else sel
+    out = list(reports)
+    if sel_campaign:
+        out = [r for r in out if (r.get("campaign_name") or "Uncategorized") == sel_campaign]
+    if not show_pyrit:  out = [r for r in out if r.get("framework") != "pyrit"]
+    if not show_garak:  out = [r for r in out if r.get("framework") != "garak"]
+    if not show_breached: out = [r for r in out if not is_breached(r)]
+    if not show_resisted: out = [r for r in out if is_breached(r)]
+    return out, sel_campaign
+
+
+# ─────────────────────────────────────────────────────────────────
+# Tab 1 — Overview
+# ─────────────────────────────────────────────────────────────────
+
+def render_overview(reports: list[dict], campaigns: dict[str, list[dict]]):
+    total    = len(reports)
+    breached = sum(1 for r in reports if is_breached(r))
+    resisted = total - breached
+    rate     = round(breached / total * 100) if total else 0
+    pyrit_n  = sum(1 for r in reports if r.get("framework") == "pyrit")
+    garak_n  = total - pyrit_n
+    pyrit_convs = [r for r in reports if r.get("framework") == "pyrit" and isinstance(r.get("conversation"), dict)]
     avg_depth = round(
         sum(len(r["conversation"].get("turns", [])) for r in pyrit_convs) / len(pyrit_convs), 1
     ) if pyrit_convs else 0
 
-    return {
-        "total": total, "breached": breached, "hardened": hardened, "rate": rate,
-        "turns": total_turns, "leaked_turns": leaked_turns,
-        "probes": total_probes, "failed_probes": failed_probes,
-        "pyrit": pyrit_count, "garak": garak_count,
-        "avg_depth": avg_depth,
-    }
+    c1, c2, c3 = st.columns(3)
+    with c1: st.markdown(kpi_card("Campaigns", len(campaigns), f"{total} total attacks"), unsafe_allow_html=True)
+    with c2: st.markdown(kpi_card("Breached", breached, f"{rate}% of all attacks", "#B91C1C"), unsafe_allow_html=True)
+    with c3: st.markdown(kpi_card("Resisted", resisted, f"{100 - rate}% of all attacks", "#15803D"), unsafe_allow_html=True)
 
+    st.markdown(breach_bar_html(rate), unsafe_allow_html=True)
+    st.markdown(section_label("Campaigns"), unsafe_allow_html=True)
 
-def render_kpis(k: dict):
-    """Render the top KPI row + breach gauge bar."""
-    st.markdown(f"""
-    <div class="kpi-grid">
-        <div class="kpi blue">
-            <div class="label">Total Attacks</div>
-            <div class="value">{k['total']}</div>
-            <div class="sub">pyrit {k['pyrit']} · garak {k['garak']}</div>
-        </div>
-        <div class="kpi red">
-            <div class="label">Breached</div>
-            <div class="value">{k['breached']}</div>
-            <div class="sub">{k['rate']}% breach rate</div>
-        </div>
-        <div class="kpi green">
-            <div class="label">Hardened</div>
-            <div class="value">{k['hardened']}</div>
-            <div class="sub">{100 - k['rate']}% resisted</div>
-        </div>
-        <div class="kpi orange">
-            <div class="label">Conv. Turns</div>
-            <div class="value">{k['turns']}</div>
-            <div class="sub">{k['leaked_turns']} leaked · avg depth {k['avg_depth']}</div>
-        </div>
-        <div class="kpi purple">
-            <div class="label">Garak Probes</div>
-            <div class="value">{k['probes']}</div>
-            <div class="sub">{k['failed_probes']} failed</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── Breach gauge ──
-    rate = k["rate"]
-    color = "#3fb950" if rate < 25 else ("#d29922" if rate < 50 else "#f85149")
-    st.markdown(f"""
-    <div class="gauge-container">
-        <span class="gauge-label" style="color:{color}">{rate}%</span>
-        <div class="gauge-bar">
-            <div class="gauge-fill" style="width:{rate}%; background:{color}"></div>
-        </div>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#484f58">
-            breach rate
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# ═════════════════════════════════════════════════════════════════
-# Analysis tab helpers
-# ═════════════════════════════════════════════════════════════════
-
-def render_analysis(reports: list[dict]):
-    """Render the Analysis tab with technique breakdown and turn-level insights."""
-
-    col1, col2 = st.columns(2)
-
-    # ── Attack technique breakdown ─────────────────────────────
-    with col1:
-        st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-        st.markdown('<div class="analysis-title">Attack Technique Breakdown</div>', unsafe_allow_html=True)
-
-        technique_stats: dict[str, dict] = {}
-        for r in reports:
-            name = r.get("attack_name", "unknown")
-            if " - " in name:
-                technique = name.split(" - ", 1)[1].split(" | ")[0].strip()
-            else:
-                technique = name
-            if technique not in technique_stats:
-                technique_stats[technique] = {"total": 0, "breached": 0}
-            technique_stats[technique]["total"] += 1
-            if is_breached(r):
-                technique_stats[technique]["breached"] += 1
-
-        for tech, stats in sorted(technique_stats.items(), key=lambda x: -x[1]["breached"]):
-            pct = round(stats["breached"] / stats["total"] * 100) if stats["total"] else 0
-            bar_color = "#f85149" if pct >= 50 else ("#d29922" if pct > 0 else "#3fb950")
-            st.markdown(f"""
-            <div class="stat-row">
-                <span class="stat-label">{e(tech)}</span>
-                <div class="bar-track">
-                    <div class="bar-fill" style="width:{pct}%;background:{bar_color}"></div>
-                </div>
-                <span class="stat-value">{stats['breached']}/{stats['total']}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Turn-level leak heatmap (PyRIT only) ───────────────────
-    with col2:
-        st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-        st.markdown('<div class="analysis-title">Turn-Level Leak Analysis (PyRIT)</div>', unsafe_allow_html=True)
-
-        turn_stats: dict[int, dict] = defaultdict(lambda: {"total": 0, "leaked": 0})
-        max_turn = 0
-        for r in reports:
-            conv = r.get("conversation")
-            if not conv:
-                continue
-            for t in conv.get("turns", []):
-                tn = t.get("turn", 0)
-                if tn > max_turn:
-                    max_turn = tn
-                turn_stats[tn]["total"] += 1
-                if t.get("score"):
-                    turn_stats[tn]["leaked"] += 1
-
-        if turn_stats:
-            for tn in range(1, max_turn + 1):
-                s = turn_stats.get(tn, {"total": 0, "leaked": 0})
-                pct = round(s["leaked"] / s["total"] * 100) if s["total"] else 0
-                bar_color = "#f85149" if pct > 0 else "#3fb950"
-                st.markdown(f"""
-                <div class="stat-row">
-                    <span class="stat-label">Turn {tn}</span>
-                    <div class="bar-track">
-                        <div class="bar-fill" style="width:{max(pct, 2)}%;background:{bar_color}"></div>
-                    </div>
-                    <span class="stat-value">{s['leaked']}/{s['total']} leaked</span>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.markdown('<div style="color:#484f58;font-size:12px;text-align:center;padding:20px">No PyRIT conversations yet.</div>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Timeline ───────────────────────────────────────────────
-    st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-    st.markdown('<div class="analysis-title">Attack Timeline</div>', unsafe_allow_html=True)
-
-    sorted_reports = sorted(reports, key=lambda r: r.get("timestamp", ""))
-    for r in sorted_reports:
-        ts = parse_ts(r)
-        ts_str = ts.strftime("%Y-%m-%d %H:%M") if ts else "?"
-        fw = r.get("framework", "?")
-        name = r.get("attack_name", "?")
-        b = is_breached(r)
-        dot_color = "#f85149" if b else "#3fb950"
-        outcome_text = "BREACHED" if b else "HARDENED"
+    for idx, (cname, cr) in enumerate(sorted(campaigns.items())):
+        ck = campaign_stats(cr)
+        accent = campaign_color(idx)
+        bar_c  = "#B91C1C" if ck["rate"] >= 50 else ("#D97706" if ck["rate"] >= 25 else "#059669")
+        target_url = next((r.get("target_url", "") for r in cr if r.get("target_url")), "—")
         st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #21262d">
-            <span style="width:8px;height:8px;border-radius:50%;background:{dot_color};flex-shrink:0"></span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#484f58;min-width:120px">{ts_str}</span>
-            <span class="fw-badge fw-{fw}" style="font-size:9px">{fw.upper()}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#c9d1d9;flex:1">{e(name)}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:{dot_color}">{outcome_text}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Detector breakdown (Garak) ─────────────────────────────
-    garak_reports = [r for r in reports if r.get("framework") == "garak"]
-    if garak_reports:
-        st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-        st.markdown('<div class="analysis-title">Garak Detector Breakdown</div>', unsafe_allow_html=True)
-        detector_stats: dict[str, dict] = {}
-        for r in garak_reports:
-            for p in r.get("prompts") or []:
-                det = p.get("detector") or "unknown"
-                if det not in detector_stats:
-                    detector_stats[det] = {"total": 0, "failed": 0}
-                detector_stats[det]["total"] += 1
-                if not p.get("passed", True):
-                    detector_stats[det]["failed"] += 1
-
-        for det, stats in sorted(detector_stats.items(), key=lambda x: -x[1]["failed"]):
-            pct = round(stats["failed"] / stats["total"] * 100) if stats["total"] else 0
-            bar_color = "#f85149" if pct >= 50 else ("#d29922" if pct > 0 else "#3fb950")
-            st.markdown(f"""
-            <div class="stat-row">
-                <span class="stat-label">{e(det)}</span>
-                <div class="bar-track">
-                    <div class="bar-fill" style="width:{max(pct, 2)}%;background:{bar_color}"></div>
-                </div>
-                <span class="stat-value">{stats['failed']}/{stats['total']} failed</span>
+<div style="background:#FFFFFF;border:1px solid #E5E3DE;border-left:4px solid {accent};
+            border-radius:0 12px 12px 0;padding:18px 22px;margin-bottom:10px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div>
+            <div style="font-size:15px;font-weight:600;color:#111;margin-bottom:6px">{e(cname)}</div>
+            <div style="font-size:12px;color:#888;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span>{ck['total']} attack(s)</span><span>·</span>
+                <span style="display:inline-flex;align-items:center;gap:3px">{dot('#B91C1C')}{ck['breached']} breached</span>
+                <span>·</span>
+                <span style="display:inline-flex;align-items:center;gap:3px">{dot('#15803D')}{ck['resisted']} resisted</span>
+                <span>·</span><span>pyrit {ck['pyrit']} · garak {ck['garak']}</span>
+                <span>·</span><span style="font-family:monospace;font-size:11px">{e(target_url)}</span>
             </div>
-            """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-# ═════════════════════════════════════════════════════════════════
-# Attack renderers
-# ═════════════════════════════════════════════════════════════════
-
-def render_pyrit(report: dict):
-    """Render a PyRIT attack card with expandable conversation trace."""
-    conv = report.get("conversation", {})
-    achieved = conv.get("achieved", False)
-    turns = conv.get("turns", [])
-    leaked_turns = sum(1 for t in turns if t.get("score"))
-
-    card_class = "breached" if achieved else "hardened"
-    outcome_class = "outcome-breached" if achieved else "outcome-hardened"
-    outcome_label = "BREACHED" if achieved else "HARDENED"
-    ts = report.get("timestamp", "")[:16].replace("T", " ")
-
-    st.markdown(f"""
-    <div class="attack-card {card_class}">
-        <div class="attack-header">
-            <span class="fw-badge fw-pyrit">PYRIT</span>
-            <span class="outcome-badge {outcome_class}">{outcome_label}</span>
-            <span class="attack-name">{e(report.get('attack_name', ''))}</span>
-            <span class="attack-meta">{len(turns)} turns · {leaked_turns} leaked · {ts}</span>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:22px;font-weight:700;color:{bar_c}">{ck['rate']}%</div>
+            <div style="font-size:11px;color:#999">breach rate</div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
-
-    with st.expander("🔍 View conversation trace", expanded=False):
-        objective = conv.get("objective", "")
-        if objective:
-            st.markdown(f"""
-            <div class="objective-box">
-                <div class="obj-label">🎯 Objective</div>
-                {e(objective)}
-            </div>
-            """, unsafe_allow_html=True)
-
-        if not turns:
-            st.markdown('<div class="empty">No turns recorded.</div>', unsafe_allow_html=True)
-            return
-
-        for turn in turns:
-            turn_num = turn.get("turn", "?")
-            prompt_text = turn.get("prompt", "")
-            response_text = turn.get("response", "")
-            score = turn.get("score", False)
-            rationale_text = turn.get("rationale", "")
-
-            if not response_text:
-                chip = '<span class="score-chip chip-nodata">NO RESPONSE</span>'
-            elif score:
-                chip = '<span class="score-chip chip-leaked">⚠ LEAKED</span>'
-            else:
-                chip = '<span class="score-chip chip-safe">✓ SAFE</span>'
-
-            prompt_html = e(prompt_text) if prompt_text else '<span class="msg-empty">— empty —</span>'
-            response_html = e(response_text) if response_text else '<span class="msg-empty">— no response —</span>'
-            rationale_html = f'<div class="rationale">{e(rationale_text)}</div>' if rationale_text else ''
-
-            st.markdown(f"""
-            <div class="turn-block">
-                <div class="turn-header">── TURN {turn_num} ──</div>
-                <div class="msg msg-attacker">
-                    <div class="msg-label">🤖 Attacker</div>
-                    {prompt_html}
-                </div>
-                <div class="msg msg-target">
-                    <div class="msg-label">🎯 Target</div>
-                    {response_html}
-                </div>
-                <div class="score-row">
-                    {chip}
-                    {rationale_html}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        summary_color = "#f85149" if achieved else "#3fb950"
-        summary_icon = "💥" if achieved else "🛡️"
-        summary_label = "Objective achieved — attack succeeded" if achieved else "Objective not achieved — target held"
-        st.markdown(f"""
-        <div class="summary-line" style="color:{summary_color}">
-            {summary_icon} {summary_label}
-        </div>
-        """, unsafe_allow_html=True)
-
-
-def render_garak(report: dict):
-    """Render a Garak attack card with expandable probe details."""
-    prompts = report.get("prompts") or []
-    failed = sum(1 for p in prompts if not p.get("passed", True))
-    passed_count = len(prompts) - failed
-    card_class = "breached" if failed > 0 else "hardened"
-    outcome_label = f"{failed} FAILED" if failed > 0 else "ALL PASSED"
-    outcome_class = "outcome-breached" if failed > 0 else "outcome-hardened"
-    ts = report.get("timestamp", "")[:16].replace("T", " ")
-
-    detectors = set(p.get("detector", "") for p in prompts if p.get("detector"))
-    det_str = f" · detectors: {', '.join(sorted(detectors))}" if detectors else ""
-
-    st.markdown(f"""
-    <div class="attack-card {card_class}">
-        <div class="attack-header">
-            <span class="fw-badge fw-garak">GARAK</span>
-            <span class="outcome-badge {outcome_class}">{outcome_label}</span>
-            <span class="attack-name">{e(report.get('attack_name', ''))}</span>
-            <span class="attack-meta">{len(prompts)} probes · {passed_count}✓ {failed}✗ · {ts}{det_str}</span>
-        </div>
+    <div style="height:4px;background:#F0EEEA;border-radius:2px;margin-top:14px;overflow:hidden">
+        <div style="width:{ck['rate']}%;height:100%;background:{bar_c};border-radius:2px"></div>
     </div>
-    """, unsafe_allow_html=True)
-
-    with st.expander("🔍 View probes", expanded=False):
-        if not prompts:
-            st.markdown('<div class="empty">No probes recorded.</div>', unsafe_allow_html=True)
-            return
-
-        for idx, p in enumerate(prompts):
-            passed_flag = p.get("passed", True)
-            row_class = "pass" if passed_flag else "fail"
-            status_label = "✓ PASS" if passed_flag else "✗ FAIL"
-            score = p.get("score")
-            score_str = f" · score {score}" if score is not None else ""
-            detector = p.get("detector", "")
-            rationale = p.get("rationale", "")
-
-            c1, c2 = st.columns(2)
-            with c1:
-                detector_html = (
-                    f'<div class="field-label" style="margin-top:8px">Detector</div>'
-                    f'<div class="field-value">{e(detector)}</div>'
-                ) if detector else ""
-                st.markdown(f"""
-                <div class="garak-probe {row_class}">
-                    <div class="probe-status {row_class}">#{idx + 1} {status_label}{score_str}</div>
-                    <div class="field-label">Prompt</div>
-                    <div class="field-value">{e(p.get('prompt', ''))}</div>
-                    {detector_html}
-                </div>
-                """, unsafe_allow_html=True)
-            with c2:
-                rationale_html = (
-                    f'<div class="field-label" style="margin-top:8px">Rationale</div>'
-                    f'<div class="field-value" style="font-style:italic;color:#8b949e">{e(rationale)}</div>'
-                ) if rationale else ""
-                st.markdown(f"""
-                <div class="garak-probe {row_class}">
-                    <div class="probe-status {row_class}">Response</div>
-                    <div class="field-value">{e(p.get('response', ''))}</div>
-                    {rationale_html}
-                </div>
-                """, unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
 
-# ═════════════════════════════════════════════════════════════════
-# Sidebar & filtering
-# ═════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────
+# Tab 2 — Campaigns
+# ─────────────────────────────────────────────────────────────────
 
-def build_sidebar(reports: list[dict]) -> list[dict]:
-    """Render sidebar filters and return the filtered list of reports."""
-    with st.sidebar:
-        st.markdown("## 🔴 RedTrace")
-        st.markdown("---")
-
-        st.markdown("**Framework**")
-        show_pyrit = st.checkbox("PyRIT", value=True)
-        show_garak = st.checkbox("Garak", value=True)
-
-        st.markdown("---")
-        st.markdown("**Outcome**")
-        show_breached = st.checkbox("Breached", value=True)
-        show_hardened = st.checkbox("Hardened", value=True)
-
-        st.markdown("---")
-        sort_by = st.selectbox("Sort", ["Latest first", "Oldest first", "Name A→Z"])
-        search = st.text_input("🔎 Search", placeholder="attack name, technique...")
-
-        st.markdown("---")
-        st.markdown(
-            f'<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:#484f58">'
-            f'{len(reports)} report(s) loaded</div>',
-            unsafe_allow_html=True,
+def render_campaigns(reports: list[dict], campaigns: dict[str, list[dict]], sel: str | None):
+    if sel:
+        _render_one_campaign(sel, campaigns.get(sel, []), 0)
+    else:
+        sorted_campaigns = sorted(
+            campaigns.items(),
+            key=lambda x: parse_ts(x[1][0]).timestamp() if x[1] and parse_ts(x[1][0]) else 0,
+            reverse=True
         )
+        for idx, (cname, cr) in enumerate(sorted_campaigns):
+            ck = campaign_stats(cr)
 
-    filtered = list(reports)
-    if not show_pyrit:
-        filtered = [r for r in filtered if r.get("framework") != "pyrit"]
-    if not show_garak:
-        filtered = [r for r in filtered if r.get("framework") != "garak"]
-    if not show_breached:
-        filtered = [r for r in filtered if not is_breached(r)]
-    if not show_hardened:
-        filtered = [r for r in filtered if is_breached(r)]
-    if search:
-        q = search.lower()
-        filtered = [r for r in filtered if q in r.get("attack_name", "").lower()
-                     or q in r.get("_filename", "").lower()]
-    if sort_by == "Oldest first":
-        filtered = list(reversed(filtered))
-    elif sort_by == "Name A→Z":
-        filtered = sorted(filtered, key=lambda r: r.get("attack_name", ""))
+            with st.expander(f"{e(cname)} · {ck['total']} attacks · {ck['rate']}% breach rate"):
+                _render_one_campaign(cname, cr, idx)
 
-    return filtered
+            if idx < len(sorted_campaigns) - 1:
+                st.markdown("<hr style='border:none;border-top:1px solid #E5E3DE;margin:12px 0'>", unsafe_allow_html=True)
 
 
-# ═════════════════════════════════════════════════════════════════
+def _render_one_campaign(cname: str, reports: list[dict], idx: int):
+    if not reports:
+        st.markdown(f'<div style="color:#888;font-size:13px">No attacks in "{e(cname)}".</div>', unsafe_allow_html=True)
+        return
+
+    ck     = campaign_stats(reports)
+    accent = campaign_color(idx)
+    bar_c  = "#B91C1C" if ck["rate"] >= 50 else ("#D97706" if ck["rate"] >= 25 else "#059669")
+
+    st.markdown(f"""
+<div style="border-left:4px solid {accent};padding-left:16px;margin-bottom:22px">
+    <div style="font-size:20px;font-weight:700;color:#111;letter-spacing:-0.01em">{e(cname)}</div>
+    <div style="font-size:12px;color:#888;margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span>{ck['total']} attack(s)</span><span>·</span>
+        <span style="display:inline-flex;align-items:center;gap:3px">{dot('#B91C1C')}{ck['breached']} breached</span>
+        <span>·</span>
+        <span style="display:inline-flex;align-items:center;gap:3px">{dot('#15803D')}{ck['resisted']} resisted</span>
+        <span>·</span><span>pyrit {ck['pyrit']} · garak {ck['garak']}</span>
+    </div>
+</div>""", unsafe_allow_html=True)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: st.markdown(kpi_card("Attacks",      ck["total"],         f"pyrit {ck['pyrit']} · garak {ck['garak']}"), unsafe_allow_html=True)
+    with c2: st.markdown(kpi_card("Breached",     ck["breached"],      f"{ck['rate']}% breach rate", "#B91C1C"),       unsafe_allow_html=True)
+    with c3: st.markdown(kpi_card("Resisted",     ck["resisted"],      f"{100 - ck['rate']}% resisted", "#15803D"),    unsafe_allow_html=True)
+    with c4: st.markdown(kpi_card("Conversations",  ck["turns"],         f"{ck['leaked']} leaked"), unsafe_allow_html=True)
+    with c5: st.markdown(kpi_card("Garak probes", ck["probes"],        f"{ck['failed_probes']} failed"),               unsafe_allow_html=True)
+
+    st.markdown(breach_bar_html(ck["rate"]), unsafe_allow_html=True)
+
+    st.markdown(section_label(f"Attacks — {e(cname)} ({len(reports)})"), unsafe_allow_html=True)
+    sorted_reports = sorted(reports, key=lambda r: parse_ts(r) or datetime.min, reverse=True)
+    for r in sorted_reports:
+        _render_attack_card(r)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Tab 3 — Attacks
+# ─────────────────────────────────────────────────────────────────
+
+def render_attacks(reports: list[dict]):
+    st.markdown(f'<div style="font-size:12px;color:#AAA;margin-bottom:16px">{len(reports)} attack(s) displayed</div>', unsafe_allow_html=True)
+    sorted_reports = sorted(reports, key=lambda r: parse_ts(r) or datetime.min, reverse=True)
+    for r in sorted_reports:
+        _render_attack_card(r)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Shared — attack card
+# ─────────────────────────────────────────────────────────────────
+
+def _render_attack_card(report: dict):
+    fw       = report.get("framework", "")
+    breached = is_breached(report)
+    border   = "#B91C1C" if breached else "#059669"
+    ts_raw   = report.get("timestamp", "")
+    ts_fmt   = ts_raw[:16].replace("T", "  ") if ts_raw else "—"
+
+    if fw == "pyrit":
+        meta  = ts_fmt
+    else:
+        prompts = report.get("prompts") or []
+        failed  = sum(1 for p in prompts if not p.get("passed", True))
+        meta    = f"{len(prompts) - failed}✓  {failed}✗  of {len(prompts)} probes · {ts_fmt}"
+
+    st.markdown(f"""
+<div style="background:#FFFFFF;border:1px solid #E5E3DE;border-left:3px solid {border};
+            border-radius:0 10px 10px 0;padding:14px 18px;margin-bottom:8px;
+            display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    {engine_badge(fw)}
+    {outcome_badge(breached)}
+    <span style="font-size:13px;font-weight:500;color:#111;flex:1;min-width:0">{e(report.get('attack_name',''))}</span>
+    <span style="font-size:11px;color:#BBB;white-space:nowrap;font-family:monospace">{meta}</span>
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("View conversation" if fw == "pyrit" else "View probes", expanded=False):
+        if fw == "pyrit":
+            _render_conversation(report)
+        else:
+            _render_probes(report)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Conversation trace (PyRIT)
+# ─────────────────────────────────────────────────────────────────
+
+def _render_conversation(report: dict):
+    conv = report.get("conversation", {})
+    if not isinstance(conv, dict):
+        st.markdown('<div style="color:#AAA;text-align:center;padding:40px;font-size:13px">No conversation data.</div>', unsafe_allow_html=True)
+        return
+
+    objective = conv.get("objective", "")
+    achieved  = conv.get("achieved", False)
+    turns     = conv.get("turns", [])
+
+    if objective:
+        st.markdown(f"""
+<div style="background:#EEF2FF;border-left:3px solid #3730A3;border-radius:0 8px 8px 0;
+            padding:12px 16px;margin-bottom:20px">
+    <div style="font-size:10px;color:#3730A3;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:6px">Objective</div>
+    <div style="font-size:14px;color:#1E1B4B;line-height:1.6">{e(objective)}</div>
+</div>""", unsafe_allow_html=True)
+
+    if not turns:
+        st.markdown('<div style="color:#AAA;text-align:center;padding:32px;font-size:13px">No turns recorded.</div>', unsafe_allow_html=True)
+        return
+
+    for turn in turns:
+        p_txt    = turn.get("prompt", "")
+        r_txt    = turn.get("response", "")
+        score    = turn.get("score", False)
+        rationale = turn.get("rationale", "")
+
+        p_html = e(p_txt) if p_txt else '<em style="color:#CCC">— empty —</em>'
+        st.markdown(f"""
+<div style="margin-bottom:4px">
+    <div style="font-size:10px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Message · Attacker</div>
+    <div style="background:#EDEBE8;border-radius:12px;padding:16px 20px;font-size:14px;line-height:1.7;color:#111;white-space:pre-wrap;word-break:break-word">{p_html}</div>
+</div>""", unsafe_allow_html=True)
+
+        leaked_border = "rgba(185,28,28,.25)" if score else "#E5E3DE"
+        r_html = highlight_leaks(r_txt) if (score and r_txt) else (e(r_txt) if r_txt else '<em style="color:#CCC">— no response —</em>')
+        st.markdown(f"""
+<div style="margin-bottom:20px;margin-left:5%">
+    <div style="font-size:10px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Message · Target</div>
+    <div style="background:#FFFFFF;border:1px solid {leaked_border};border-radius:12px;padding:16px 20px;font-size:14px;line-height:1.7;color:#111;white-space:pre-wrap;word-break:break-word">{r_html}</div>
+</div>""", unsafe_allow_html=True)
+
+    last      = turns[-1] if turns else {}
+    rationale = last.get("rationale", "")
+    rat_html  = f" — {e(rationale)}" if rationale else ""
+    if achieved:
+        breach_turn = next((t.get("turn", "?") for t in turns if t.get("score")), len(turns))
+        st.markdown(f'<div style="background:#FEF2F2;border:1px solid rgba(185,28,28,.2);border-radius:8px;padding:16px 18px;font-size:13px;font-weight:600;color:#B91C1C;margin-top:28px;margin-bottom:20px;display:flex;align-items:center;gap:8px;justify-content:flex-start"><span style="font-size:16px">⚠️</span>Scored as breached{rat_html}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="background:#F0FDF4;border:1px solid rgba(21,128,61,.2);border-radius:8px;padding:16px 18px;font-size:13px;font-weight:600;color:#15803D;margin-top:28px;margin-bottom:20px;display:flex;align-items:center;gap:8px;justify-content:flex-start"><span style="font-size:16px">✅</span>Target resisted{rat_html}</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Garak probe table
+# ─────────────────────────────────────────────────────────────────
+
+def _render_probes(report: dict):
+    prompts = report.get("prompts") or []
+    if not prompts:
+        st.markdown('<div style="color:#AAA;text-align:center;padding:32px;font-size:13px">No probes recorded.</div>', unsafe_allow_html=True)
+        return
+
+    st.markdown("""
+<div style="background:#FFFFFF;border:1px solid #E5E3DE;border-radius:10px;overflow:hidden">
+<div style="display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid #E5E3DE;
+            font-size:10px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.08em">
+    <span style="flex:2">Prompt</span><span style="flex:2">Response</span>
+    <span style="min-width:120px">Detector</span><span style="min-width:80px">Outcome</span>
+</div>""", unsafe_allow_html=True)
+
+    failed_n = 0
+    for p in prompts:
+        passed = p.get("passed", True)
+        if not passed: failed_n += 1
+        bl = "3px solid #B91C1C" if not passed else "3px solid transparent"
+        bg = "#FFFAFA" if not passed else "#FFFFFF"
+        st.markdown(f"""
+<div style="display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid #F5F4F0;
+            background:{bg};border-left:{bl};align-items:flex-start">
+    <span style="flex:2;font-size:12px;color:#333;word-break:break-all">{e(p.get('prompt',''))[:150]}</span>
+    <span style="flex:2;font-size:12px;color:#777;word-break:break-all">{e(p.get('response',''))[:150]}</span>
+    <span style="min-width:120px;font-size:11px;color:#888">{e(p.get('detector',''))}</span>
+    <span style="min-width:80px">{outcome_badge(not passed)}</span>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(f'<div style="text-align:center;font-size:12px;color:#888;margin-top:12px;font-weight:600">{failed_n} of {len(prompts)} probes breached</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────
 # Main
-# ═════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────
 
 def main():
-    reports_path = Path(get_runtime_settings().json_reports_dir)
+    reports_path = Path(get_runtime_settings(frameworks=set()).json_reports_dir)
 
     if not reports_path.exists() or not any(reports_path.glob("*.json")):
         st.markdown(
-            f'<div class="empty">No reports found in <code>{e(str(reports_path))}</code>'
-            f' — run your first attack.</div>',
+            f'<div style="text-align:center;padding:80px;color:#AAA;font-size:13px">'
+            f'No reports found in <code style="font-size:12px">{e(str(reports_path))}</code>'
+            f' — run your first campaign.</div>',
             unsafe_allow_html=True,
         )
         return
 
-    reports = load_reports(reports_path)
-    filtered = build_sidebar(reports)
+    all_reports = load_reports(reports_path)
+    campaigns   = group_by_campaign(all_reports)
+    filtered, sel = build_sidebar(all_reports, campaigns)
+    f_camps     = group_by_campaign(filtered)
 
-    # ── Tabs ───────────────────────────────────────────────────
-    tab_overview, tab_attacks, tab_analysis = st.tabs(["📊 Overview", "⚔️ Attacks", "🔬 Analysis"])
+    tab1, tab2, tab3 = st.tabs(["Overview", "Campaigns", "Attacks"])
 
-    # ── TAB 1: Overview ────────────────────────────────────────
-    with tab_overview:
-        kpis = compute_kpis(reports)
-        render_kpis(kpis)
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-            st.markdown('<div class="analysis-title">Framework Split</div>', unsafe_allow_html=True)
-            for fw, count in [("PyRIT", kpis["pyrit"]), ("Garak", kpis["garak"])]:
-                pct = round(count / kpis["total"] * 100) if kpis["total"] else 0
-                color = "#58a6ff" if fw == "PyRIT" else "#3fb950"
-                st.markdown(f"""
-                <div class="stat-row">
-                    <span class="stat-label">{fw}</span>
-                    <div class="bar-track">
-                        <div class="bar-fill" style="width:{pct}%;background:{color}"></div>
-                    </div>
-                    <span class="stat-value">{count} ({pct}%)</span>
-                </div>
-                """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with col2:
-            st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-            st.markdown('<div class="analysis-title">Outcome Split</div>', unsafe_allow_html=True)
-            for label, count, color in [
-                ("Breached", kpis["breached"], "#f85149"),
-                ("Hardened", kpis["hardened"], "#3fb950"),
-            ]:
-                pct = round(count / kpis["total"] * 100) if kpis["total"] else 0
-                st.markdown(f"""
-                <div class="stat-row">
-                    <span class="stat-label">{label}</span>
-                    <div class="bar-track">
-                        <div class="bar-fill" style="width:{pct}%;background:{color}"></div>
-                    </div>
-                    <span class="stat-value">{count} ({pct}%)</span>
-                </div>
-                """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with col3:
-            st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
-            st.markdown('<div class="analysis-title">Depth & Leaks</div>', unsafe_allow_html=True)
-            items = [
-                ("Avg conversation depth", f"{kpis['avg_depth']} turns"),
-                ("Total turns", str(kpis["turns"])),
-                ("Leaked turns", str(kpis["leaked_turns"])),
-                ("Total probes (Garak)", str(kpis["probes"])),
-                ("Failed probes", str(kpis["failed_probes"])),
-            ]
-            for label, val in items:
-                st.markdown(f"""
-                <div class="stat-row">
-                    <span class="stat-label">{label}</span>
-                    <span class="stat-value">{val}</span>
-                </div>
-                """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── TAB 2: Attacks ─────────────────────────────────────────
-    with tab_attacks:
-        st.markdown(
-            f'<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#484f58;'
-            f'margin-bottom:14px">{len(filtered)} attack(s) displayed</div>',
-            unsafe_allow_html=True,
-        )
-        for report in filtered:
-            fw = report.get("framework", "")
-            if fw == "pyrit":
-                render_pyrit(report)
-            elif fw == "garak":
-                render_garak(report)
-            else:
-                st.markdown(
-                    f'<div style="font-family:JetBrains Mono,monospace;font-size:11px;'
-                    f'color:#484f58;padding:10px">Unknown format: {e(report.get("_filename", ""))}</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── TAB 3: Analysis ────────────────────────────────────────
-    with tab_analysis:
-        render_analysis(reports)
+    with tab1: render_overview(filtered, f_camps)
+    with tab2: render_campaigns(filtered, f_camps, sel)
+    with tab3: render_attacks(filtered)
 
 
 if __name__ == "__main__":
