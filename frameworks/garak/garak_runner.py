@@ -18,7 +18,7 @@ class GarakRunner(Runner):
     """Run Garak attacks and normalize the generated report into framework results."""
 
     def __init__(self):
-        self.settings = get_runtime_settings()
+        self.settings = get_runtime_settings(frameworks={"garak"})
         self.garak_reports_dir = Path(self.settings.garak_reports_dir)
         self.config_path = Path(self.settings.garak_config_path)
 
@@ -73,7 +73,7 @@ class GarakRunner(Runner):
     def _build_garak_command(self, target: AttackTarget, attack: Attack, report_prefix: str) -> list[str]:
         """Build the Garak CLI command for the current target and probe."""
         return [
-            self.settings.garak_python_executable,
+            "python3",
             "-m",
             "garak",
             "--target_type",

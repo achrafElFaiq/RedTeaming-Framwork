@@ -5,12 +5,12 @@ from core.models.attack_target import AttackTarget
 
 
 class Adapter(ABC):
-    """Abstract base class for attack adaptors. Takes an attackTarget and returns a format that can be used by the runner.
-    the adapter takes the target and implments a new method that return the correct object that the runner must use
+    """Base contract for framework-to-runner target adaptation.
 
+    An adapter receives a framework `AttackTarget` and returns the target
+    object format expected by a specific backend runner.
     """
 
     @abstractmethod
     def wrap(self, target: AttackTarget) -> Any:
         pass
-

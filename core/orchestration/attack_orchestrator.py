@@ -14,6 +14,7 @@ class AttackOrchestrator:
     def __init__(
         self,
         target: AttackTarget,
+        campaign_name: str = "",
         use_case_doc_path: str = None,
         attacks: list[Attack] = None,
         report_store: JsonReportStore | None = None,
@@ -21,6 +22,7 @@ class AttackOrchestrator:
     ):
         self.attacks = attacks or []
         self.target = target
+        self.campaign_name = campaign_name
         self.use_case_doc_path = use_case_doc_path
         self.report_store = report_store or JsonReportStore()
         self.reset_target_between_attacks = reset_target_between_attacks
@@ -48,7 +50,14 @@ class AttackOrchestrator:
             )
             attack_start = time.monotonic()
             try:
+                # Execute and collect results
                 attack_results = attack.execute(self.target)
+
+                # Stamp each result with campaign name
+                for result in attack_results:
+                    result.campaign_name = self.campaign_name
+
+                # Save attack results
                 self.results.extend(attack_results)
                 saved_paths = self.report_store.save_batch(attack_results)
                 self.saved_report_paths.extend(str(path) for path in saved_paths)

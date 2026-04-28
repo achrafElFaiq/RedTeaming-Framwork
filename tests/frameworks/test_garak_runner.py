@@ -56,7 +56,7 @@ class GarakRunnerTests(unittest.TestCase):
         self.assertEqual(results, [expected_result])
         run_mock.assert_called_once()
         command = run_mock.call_args.args[0]
-        self.assertEqual(command[0], runner.settings.garak_python_executable)
+        self.assertEqual(command[0], "python3")
         self.assertIn("--probes", command)
         self.assertIn("promptinject", command)
         self.assertIn("--report_prefix", command)

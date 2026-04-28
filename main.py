@@ -6,16 +6,19 @@ Usage::
 
     python main.py <campaign.yaml>
     python main.py campaigns/smoke_test.yaml --log-level DEBUG
+    python main.py campaigns/smoke_test.yaml --skip-checks
 """
 
 import argparse
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from core.application.campaign_loader import load_campaign
+from core.application.health_check import run_preflight_checks
 from core.models.attack_target import AttackTarget
 from core.orchestration.attack_orchestrator import AttackOrchestrator
 
@@ -76,6 +79,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip automatic dashboard launch after the campaign",
     )
+    parser.add_argument(
+        "--skip-checks",
+        action="store_true",
+        help="Skip pre-flight health checks (target, LLMs, DB)",
+    )
     return parser.parse_args(argv)
 
 
@@ -93,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     logger.info("─" * 60)
-    logger.info("[Config] Campaign  : %s", args.campaign)
+    logger.info("[Config] Campaign  : %s", config.campaign_name or args.campaign)
     logger.info("[Config] Target    : %s → %s", config.target_name, config.target_url)
     logger.info("[Config] Attacks   : %d", len(config.active_attacks))
     for i, atk in enumerate(config.active_attacks, 1):
@@ -101,10 +109,25 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("[Config]   %d. [%s] %s (%s)", i, atk.framework, atk.intent, mode)
     logger.info("─" * 60)
 
+    # ── Pre-flight health checks ──────────────────────────────
+    if not args.skip_checks:
+        issues = run_preflight_checks(config)
+        if issues:
+            logger.error("─" * 60)
+            logger.error("[Preflight] Campaign aborted — fix the issues below:")
+            for issue in issues:
+                logger.error("[Preflight]   ✗ %s", issue)
+            logger.error("─" * 60)
+            logger.error("[Preflight] Use --skip-checks to bypass pre-flight checks")
+            return 1
+    else:
+        logger.info("[Preflight] Skipped (--skip-checks)")
+
     # ── Build orchestrator ─────────────────────────────────────
     target = AttackTarget(config.target_name, config.target_url)
     orchestrator = AttackOrchestrator(
         target=target,
+        campaign_name=config.campaign_name,
         use_case_doc_path=config.use_case_doc_path or None,
     )
     for attack in config.active_attacks:
@@ -137,12 +160,18 @@ def _launch_dashboard(logger: logging.Logger) -> None:
     """Launch the Streamlit dashboard in a subprocess."""
     logger.info("─" * 50)
     logger.info("[Dashboard] Lancement du dashboard RedTrace...")
-    logger.info("[Dashboard] URL : http://localhost:8501")
+    logger.info("[Dashboard] Local   : http://localhost:8501")
     logger.info("─" * 50)
     try:
         subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(DASHBOARD_PATH)],
+            [
+                sys.executable, "-m", "streamlit", "run", str(DASHBOARD_PATH),
+                "--server.headless", "true",
+                "--global.showWarningOnDirectExecution", "false",
+                "--runner.magicEnabled", "false",
+            ],
             check=False,
+            env={**os.environ, "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false"},
         )
     except KeyboardInterrupt:
         logger.info("[Dashboard] Dashboard arrêté par l'utilisateur")

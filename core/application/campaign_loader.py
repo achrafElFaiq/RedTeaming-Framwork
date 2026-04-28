@@ -66,6 +66,7 @@ def load_campaign(yaml_path: str | Path) -> CampaignConfig:
     )
 
     return CampaignConfig(
+        campaign_name=campaign_meta.get("name", path.stem),
         target_name=target_cfg["name"],
         target_url=target_cfg["url"],
         use_case_doc_path=use_case_doc,

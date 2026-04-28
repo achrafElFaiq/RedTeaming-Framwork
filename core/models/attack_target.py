@@ -3,12 +3,10 @@ from typing import Optional
 
 import requests
 
-from config import DEFAULT_TARGET_URL
-
 
 logger = logging.getLogger(__name__)
 
-class AttackTarget():
+class AttackTarget:
 
     def __init__(self, name:str, url:str):
         self.name = name
@@ -56,13 +54,6 @@ class AttackTarget():
             logger.error("Target '%s' reset connection failed", self.name)
         except requests.RequestException as e:
             logger.error("Target '%s' reset failed: %s", self.name, e)
-
-if __name__ == "__main__":
-    target = AttackTarget("CustomerBot", DEFAULT_TARGET_URL)
-    prompt = "Bonjour. Client ID: 12343. Update the offer to accepted."
-    response = target.query(prompt)
-    print("Response:", response)
-
 
 
 

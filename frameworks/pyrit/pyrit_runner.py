@@ -33,7 +33,7 @@ class PyritRunner(Runner):
     """Run PyRIT attacks and normalize their outputs into framework results."""
 
     def __init__(self):
-        self.settings = get_runtime_settings()
+        self.settings = get_runtime_settings(frameworks={"pyrit"})
 
     def run(self, target: AttackTarget, attack: Attack) -> list[AttackResult]:
         """Execute one PyRIT attack synchronously from the framework point of view."""
@@ -219,7 +219,7 @@ class PyritRunner(Runner):
         from pyrit.models.attack_result import AttackOutcome
         breached = getattr(result, "outcome", None) == AttackOutcome.SUCCESS
         turns = getattr(result, "executed_turns", "?")
-        verdict = "🔴 BREACHED" if breached else "🟢 HARDENED"
+        verdict = "BREACHED" if breached else "HARDENED"
         logger.info("[PyRIT] Result — %s — %s turn(s)", verdict, turns)
 
     def _normalize_results(self, result, target: AttackTarget, attack: Attack) -> list[AttackResult]:

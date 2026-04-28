@@ -38,7 +38,7 @@ class PyritAdapter(Adapter):
                 self._turn_counter += 1
                 prompt_preview = prompt[:120].replace("\n", " ")
                 logger.info(
-                    "[Turn %d] 🤖 Attacker → %s",
+                    "[Turn %d] (Attacker) → %s",
                     self._turn_counter, prompt_preview,
                 )
 
@@ -46,7 +46,7 @@ class PyritAdapter(Adapter):
 
                 response_preview = response[:120].replace("\n", " ")
                 logger.info(
-                    "[Turn %d] 🎯 Target  → %s",
+                    "[Turn %d] (Target)  → %s",
                     self._turn_counter, response_preview,
                 )
 

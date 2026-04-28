@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class JsonReportStore:
     def __init__(self, reports_dir: str | Path | None = None):
-        resolved_reports_dir = reports_dir or get_runtime_settings().json_reports_dir
+        resolved_reports_dir = reports_dir or get_runtime_settings(frameworks=set()).json_reports_dir
         self.reports_dir = Path(resolved_reports_dir)
 
     def save_batch(self, results: list[AttackResult]) -> list[Path]:
