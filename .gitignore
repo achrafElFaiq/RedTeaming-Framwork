@@ -24,6 +24,13 @@ test.json
 # Report folder
 reports/
 
-# Use-cases folders (local development, not tracked)
+# Campaigns & attack catalog (contain confidential attack data)
+campaigns/
+attack_catalog/
+
+# Environment config (contains API keys / endpoints)
+.env
+
+# Use-cases folders (legacy, not tracked)
 use_cases/
 orange_use_cases/

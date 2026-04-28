@@ -1,0 +1,34 @@
+# ═══════════════════════════════════════════════════════════════
+# TEMPLATE — Campagne Red Teaming
+# ═══════════════════════════════════════════════════════════════
+#
+# Une campagne = une cible + une liste d'attaques du catalogue.
+# Chaque attaque est un chemin vers un fichier YAML.
+#
+# Usage :
+#   python main.py campaigns/ma_campagne.yaml
+#
+# Copier ce fichier dans campaigns/ et remplir les champs.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Métadonnées (optionnel) ───────────────────────────────────
+campaign:
+  name: "REMPLACER — Nom de la campagne"
+  description: >
+    REMPLACER — Description de ce que la campagne teste.
+
+# ── Cible à attaquer ─────────────────────────────────────────
+target:
+  name: "REMPLACER — Nom lisible de la cible"       # ex: "CustomerBot SIA"
+  url: "http://localhost:8000/api/chat"              # endpoint HTTP de la cible
+  # use_case_doc: "chemin/vers/doc.md"               # optionnel
+
+# ── Attaques à exécuter (dans l'ordre) ───────────────────────
+# Chaque ligne est un chemin vers un fichier d'attaque YAML.
+# Les chemins sont relatifs à la racine du projet.
+attacks:
+  - attack_catalog/pyrit/REMPLACER.yaml
+  - attack_catalog/pyrit/REMPLACER.yaml
+  - attack_catalog/garak/REMPLACER.yaml
+  # Ajouter autant d'attaques que nécessaire...
+

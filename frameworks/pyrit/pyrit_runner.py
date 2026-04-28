@@ -1,199 +1,179 @@
-# 1. Standard Python Libraries
 import asyncio
-from pathlib import Path
-from datetime import datetime
-from typing import Any
+import gc
+import logging
+from typing import Any, cast
 
-# 2. Third-Party Libraries (PyRIT)
+from config import get_runtime_settings, resolve_pyrit_attacker_config, build_pyrit_scorer_config
 from pyrit.executor.attack import (
     AttackAdversarialConfig,
     AttackScoringConfig,
-    ConsoleAttackResultPrinter,
-    RedTeamingAttack,
     CrescendoAttack,
-    MultiPromptSendingAttack,
-    MultiPromptSendingAttackParameters,
-    AttackScoringConfig,
+    PromptSendingAttack,
+    RedTeamingAttack,
+    AttackExecutor,
 )
-from core.utils import slugify
 
-from pyrit.executor.attack import (
-            MultiPromptSendingAttack,
-            MultiPromptSendingAttackParameters,
-            AttackScoringConfig,
-        )
-
-from pyrit.models import SeedDataset, SeedPrompt, Message, MessagePiece
-
+from pyrit.executor.attack.core.attack_executor import AttackExecutorResult
 from pyrit.prompt_target.openai.openai_chat_target import OpenAIChatTarget
 from pyrit.memory.central_memory import CentralMemory
 from pyrit.memory.sqlite_memory import SQLiteMemory
 from pyrit.score.true_false.self_ask_true_false_scorer import SelfAskTrueFalseScorer
 
-# 3. Internal/Custom Modules (Your Core logic)
 from core.models.attack_target import AttackTarget
 from core.models.attack import Attack
 from core.models.attack_result import AttackResult
 from core.contracts.runner import Runner
 from .pyrit_adapter import PyritAdapter
 
+
+logger = logging.getLogger(__name__)
+
+
 class PyritRunner(Runner):
+    """Run PyRIT attacks and normalize their outputs into framework results."""
 
-
-    DB_PATH = str(Path.home() / "Library/Application Support/dbdata/pyrit.db")
+    def __init__(self):
+        self.settings = get_runtime_settings()
 
     def run(self, target: AttackTarget, attack: Attack) -> list[AttackResult]:
-        CentralMemory.set_memory_instance(SQLiteMemory())
+        """Execute one PyRIT attack synchronously from the framework point of view."""
+        self._initialize_memory()
 
         loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(self._run_async(target, attack))
         finally:
-            loop.run_until_complete(asyncio.sleep(0.3))
-            loop.close()
+            asyncio.set_event_loop(None)
+            self._shutdown_event_loop(loop)
 
-    async def _run_async(self, target: AttackTarget, attack: Attack) -> Any:
+    def _initialize_memory(self) -> None:
+        """Bootstrap the PyRIT shared memory backend for the current run."""
+        CentralMemory.set_memory_instance(cast(Any, SQLiteMemory()))
 
-        print("\n" + "="*40)
-        print(f"[PyritRunner] Starting PyRIT attack '{attack.name}' execution...")
-        print("="*40 + "\n")
+    async def _run_async(self, target: AttackTarget, attack: Attack) -> list[AttackResult]:
+        """Run the async PyRIT pipeline, then normalize the backend result."""
+        objective_target = self._prepare_objective_target(target)
+        attacker_config = resolve_pyrit_attacker_config(attack.config)
+        result = await self._execute_orchestrator(attack, objective_target, attacker_config)
+        self._log_backend_trace(result)
+        return self._normalize_results(result, target, attack)
 
-        print("[PyritRunner] Wrapping target with PyRIT adapter...")
+    def _prepare_objective_target(self, target: AttackTarget):
+        """Wrap the framework target with the PyRIT adapter."""
+        logger.debug("Wrapping target '%s' with PyRIT adapter", target.name)
         objective_target = PyritAdapter().wrap(target)
+        self._log_target_capabilities(objective_target)
+        return objective_target
 
-        # --- DEBUG CAPABILITIES ---
-        print(f"[PyritRunner] Verification technique: .supports_multi_turn = {objective_target.supports_multi_turn}")
-        caps = getattr(objective_target, '_capabilities', None)
-        if caps:
-            print(f"[PyritRunner] Capacité interne détectée : True (Multi-turn: {caps.supports_multi_turn})")
-        else:
-            print("[PyritRunner] L'objet n'a pas chargé les capabilities !")
+    def _log_target_capabilities(self, objective_target) -> None:
+        logger.debug(
+            "PyRIT target supports_multi_turn=%s",
+            getattr(objective_target, "supports_multi_turn", None),
+        )
 
-        orchestrator_type = attack.config.get("orchestrator", "red_teaming")
-        print(f"[PyritRunner] Orchestrator type: {orchestrator_type}")
+    async def _execute_orchestrator(self, attack: Attack, objective_target, attacker_config: dict[str, str]) -> Any:
+        """Dispatch the attack to the correct PyRIT execution mode."""
+        orchestrator_type = self._resolve_orchestrator_type(attack)
+        scorer_config = build_pyrit_scorer_config()
 
         if orchestrator_type == "dataset":
-            print("[PyritRunner] Dataset mode — no attacker LLM needed.")
-            print("[PyritRunner] Initializing scorer with dedicated LLM...")
-            scorer = SelfAskTrueFalseScorer(
-                chat_target=OpenAIChatTarget(
-                    endpoint=attack.config.get("attacker_endpoint"),
-                    model_name=attack.config.get("attacker_model"),
-                    api_key=attack.config.get("attacker_api_key"),
-                ),
-                true_false_question=attack.config.get("scoring_question"),
-            )
+            logger.debug("Initializing dataset scorer for attack '%s'", attack.name)
+            scorer_llm = self._build_scorer_llm(scorer_config)
+            scorer = self._build_scorer(scorer_llm, attack)
             prompts = attack.config.get("prompts", [])
-            print(f"[PyritRunner] Dataset loaded: {len(prompts)} prompts.")
-            result = await self._run_dataset(attack, objective_target, scorer)
+            logger.info("[PyRIT] Dataset mode — %d prompt(s), max_concurrency=%d",
+                        len(prompts), self.settings.pyrit_dataset_max_concurrency)
+            return await self._run_dataset(attack, objective_target, scorer)
 
-        else:
-            print("[PyritRunner] Setting up attacker LLM and scoring configuration...")
-            attacker_llm = OpenAIChatTarget(
-                endpoint=attack.config.get("attacker_endpoint"),
-                model_name=attack.config.get("attacker_model"),
-                api_key=attack.config.get("attacker_api_key"),
-                # extra_body_parameters={"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}},
+        attacker_llm = self._build_attacker_llm(attacker_config)
+        scorer_llm = self._build_scorer_llm(scorer_config)
+        scorer = self._build_scorer(scorer_llm, attack)
+
+        if orchestrator_type == "red_teaming":
+            objective_preview = attack.config.get("objective", "")[:100]
+            logger.info(
+                "[PyRIT] Red teaming — max_turns=%d — objective: %s...",
+                attack.config.get("max_turns", 5),
+                objective_preview,
             )
-
-            print("[PyritRunner] Initializing scorer...")
-            scorer = SelfAskTrueFalseScorer(
-                chat_target=attacker_llm,
-                true_false_question=attack.config.get("scoring_question"),
+            return await self._run_red_teaming(attack, objective_target, attacker_llm, scorer)
+        if orchestrator_type == "crescendo":
+            objective_preview = attack.config.get("objective", "")[:100]
+            logger.info(
+                "[PyRIT] Crescendo — max_turns=%d — objective: %s...",
+                attack.config.get("max_turns", 6),
+                objective_preview,
             )
+            return await self._run_crescendo(attack, objective_target, attacker_llm, scorer)
 
-            if orchestrator_type == "red_teaming":
-                print("[PyritRunner] Running RedTeaming attack...")
-                result = await self._run_red_teaming(attack, objective_target, attacker_llm, scorer)
-            elif orchestrator_type == "crescendo":
-                print("[PyritRunner] Running Crescendo attack...")
-                result = await self._run_crescendo(attack, objective_target, attacker_llm, scorer)
-            else:
-                raise ValueError(f"Unknown orchestrator type: {orchestrator_type}")
+        raise ValueError(f"Unknown orchestrator type: {orchestrator_type}")
 
-        # DEBUG
-        from pyrit.executor.attack.core.attack_executor import AttackExecutorResult
+    def _resolve_orchestrator_type(self, attack: Attack) -> str:
+        """Resolve the configured PyRIT execution mode for the attack."""
+        return attack.config.get("orchestrator", "red_teaming")
 
-        if not isinstance(result, AttackExecutorResult):
-            memory = CentralMemory.get_memory_instance()
-            pieces = memory.get_message_pieces(conversation_id=result.conversation_id)
-            print(f"[DEBUG] {len(pieces)} pieces dans la conversation principale")
-            for p in pieces:
-                print(f"  role={p.role} | seq={p.sequence} | value={p.original_value[:60]}")
-            print(f"[DEBUG] outcome: {result.outcome}")
-            print(f"[DEBUG] executed_turns: {result.executed_turns}")
-            print(f"[DEBUG] last_score: {result.last_score}")
-        else:
-            print(f"[DEBUG] Dataset: {len(result.completed_results)} results")
-            for i, r in enumerate(result.completed_results):
-                print(f"  [{i}] outcome={r.outcome} | conv={r.conversation_id[:8]}")
+    def _build_attacker_llm(self, attacker_config: dict[str, str]) -> OpenAIChatTarget:
+        """Build the attacker/scorer chat target from resolved runtime settings."""
+        logger.info(
+            "[PyRIT] Attacker LLM: %s @ %s",
+            attacker_config["attacker_model"],
+            attacker_config["attacker_endpoint"],
+        )
+        return OpenAIChatTarget(
+            endpoint=attacker_config["attacker_endpoint"],
+            model_name=attacker_config["attacker_model"],
+            api_key=attacker_config["attacker_api_key"],
+        )
 
-        # normalize and save
-        print("[PyritRunner] Normalizing and saving results...")
-        from .pyrit_normalizer import PyritNormalizer
-        from pyrit.executor.attack.core.attack_executor import AttackExecutorResult
+    def _build_scorer(self, chat_target: OpenAIChatTarget, attack: Attack) -> SelfAskTrueFalseScorer:
+        """Build the PyRIT objective scorer for the current attack."""
+        return SelfAskTrueFalseScorer(
+            chat_target=chat_target,
+            true_false_question=attack.config.get("scoring_question"),
+        )
 
-        normalized_results: list[AttackResult] = []
+    def _build_scorer_llm(self, scorer_config: dict[str, str]) -> OpenAIChatTarget:
+        """Build the scorer chat target from resolved runtime settings."""
+        logger.info(
+            "[PyRIT] Scorer LLM : %s @ %s",
+            scorer_config["scorer_model"],
+            scorer_config["scorer_endpoint"],
+        )
+        return OpenAIChatTarget(
+            endpoint=scorer_config["scorer_endpoint"],
+            model_name=scorer_config["scorer_model"],
+            api_key=scorer_config["scorer_api_key"],
+        )
 
-        if isinstance(result, AttackExecutorResult):
-            print(f"[PyritRunner] Dataset result: {len(result.completed_results)} completed, "
-                  f"{len(result.incomplete_objectives)} failed.")
+    async def _run_dataset(self, attack, objective_target, scorer):
+        """Execute the dataset-style single-turn flow over multiple objectives."""
+        prompts = attack.config.get("prompts", [])
+        if not prompts:
+            raise ValueError("Dataset mode requires 'prompts' in attack config")
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            intent_slug = slugify(attack.intent)
+        scoring_config = AttackScoringConfig(objective_scorer=scorer)
 
-            for i, individual_result in enumerate(result.completed_results):
-                # Nom unique par prompt — le prompt devient partie intégrante du nom
-                prompt_preview = individual_result.objective[:60]
-                unique_attack_name = f"{attack.name} | [{i + 1:02d}] {prompt_preview}"
+        single_attack = PromptSendingAttack(
+            objective_target=objective_target,
+            attack_scoring_config=scoring_config,
+        )
 
-                normalizer = PyritNormalizer(
-                    pyrit_result=individual_result,
-                    db_path=self.DB_PATH,
-                    target_url=target.url,
-                    attack_name=unique_attack_name,  # ← nom unique ici
-                )
-                attack_result = normalizer.normalize()
-                normalized_results.append(attack_result)
-                Path("reports").mkdir(exist_ok=True)
+        executor = AttackExecutor(max_concurrency=self.settings.pyrit_dataset_max_concurrency)
 
-                prompt_slug = slugify(individual_result.objective)[:40]
-                attack_result.save(
-                    f"reports/pyrit_{orchestrator_type}_{intent_slug}_"
-                    f"{timestamp}_{i:02d}_{prompt_slug}.json"
-                )
-                print(f"[PyritRunner] Report saved for prompt {i + 1}/{len(result.completed_results)}.")
+        logger.info(
+            "Executing %d dataset prompt(s) in parallel with max_concurrency=%d",
+            len(prompts),
+            self.settings.pyrit_dataset_max_concurrency,
+        )
 
-        else:
-            # Crescendo / RedTeaming — un seul AttackResult
-            normalizer = PyritNormalizer(
-                pyrit_result=result,
-                db_path=self.DB_PATH,
-                target_url=target.url,
-                attack_name=attack.name,
-            )
-            attack_result = normalizer.normalize()
-            normalized_results.append(attack_result)
-            Path("reports").mkdir(exist_ok=True)
-
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            intent_slug = slugify(attack.intent)
-            attack_result.save(
-                f"reports/pyrit_{orchestrator_type}_{intent_slug}_{timestamp}.json"
-            )
-            print(f"[PyritRunner] Report saved.")
-
-        print(f"[PyritRunner] Reseting target memory.")
-        target.reset_history()
-        print(f"[PyritRunner] Reseting target memory. Done")
-
-        print(f"[PyritRunner] Attack execution finished. Returning result.")
-        return normalized_results
-
+        return await executor.execute_multi_objective_attack_async(
+            attack=single_attack,
+            objectives=prompts,
+        )
 
     async def _run_red_teaming(self, attack, objective_target, attacker_llm, scorer):
-        """Ton orchestrateur existant — inchangé."""
+        """Execute the multi-turn PyRIT red teaming flow."""
         adversarial_config = AttackAdversarialConfig(
             target=attacker_llm,
             system_prompt_path=attack.config.get("strategy_path", None),
@@ -207,8 +187,8 @@ class PyritRunner(Runner):
         )
         return await red_team.execute_async(objective=attack.config.get("objective"))
 
-
     async def _run_crescendo(self, attack, objective_target, attacker_llm, scorer):
+        """Execute the multi-turn PyRIT crescendo flow."""
         adversarial_config = AttackAdversarialConfig(
             target=attacker_llm,
             system_prompt_path=attack.config.get("strategy_path", None),
@@ -225,29 +205,91 @@ class PyritRunner(Runner):
             objective=attack.config.get("objective")
         )
 
-    async def _run_dataset(self, attack, objective_target, scorer):
-        from pyrit.executor.attack import (
-            PromptSendingAttack,
-            AttackExecutor,
-            AttackScoringConfig,
+    def _log_backend_trace(self, result: Any) -> None:
+        """Log a readable summary of the raw PyRIT backend output."""
+        if isinstance(result, AttackExecutorResult):
+            completed = len(result.completed_results)
+            incomplete = len(result.incomplete_objectives)
+            logger.info(
+                "[PyRIT] Dataset finished — %d completed, %d incomplete",
+                completed, incomplete,
+            )
+            return
+
+        from pyrit.models.attack_result import AttackOutcome
+        breached = getattr(result, "outcome", None) == AttackOutcome.SUCCESS
+        turns = getattr(result, "executed_turns", "?")
+        verdict = "🔴 BREACHED" if breached else "🟢 HARDENED"
+        logger.info("[PyRIT] Result — %s — %s turn(s)", verdict, turns)
+
+    def _normalize_results(self, result, target: AttackTarget, attack: Attack) -> list[AttackResult]:
+        """Convert the PyRIT backend result into framework-level attack results."""
+
+        if isinstance(result, AttackExecutorResult):
+            normalized_results = self._normalize_dataset_results(result, target, attack)
+        else:
+            normalized_results = [self._normalize_single_result(result, target, attack)]
+
+        return normalized_results
+
+    def _normalize_dataset_results(
+        self,
+        result: AttackExecutorResult,
+        target: AttackTarget,
+        attack: Attack,
+    ) -> list[AttackResult]:
+        """Normalize a dataset execution into one result per completed objective."""
+        from .pyrit_normalizer import PyritNormalizer
+
+
+        normalized_results: list[AttackResult] = []
+        for index, individual_result in enumerate(result.completed_results):
+            attack_name = self._build_dataset_attack_name(attack.name, individual_result.objective, index)
+            normalizer = PyritNormalizer(
+                pyrit_result=individual_result,
+                db_path=self.settings.pyrit_db_path,
+                target_url=target.url,
+                attack_name=attack_name,
+            )
+            normalized_results.append(normalizer.normalize())
+
+        return normalized_results
+
+    def _build_dataset_attack_name(self, base_attack_name: str, objective: str, index: int) -> str:
+        """Build a stable readable attack name for one dataset objective result."""
+        prompt_preview = objective[:60]
+        return f"{base_attack_name} | [{index + 1:02d}] {prompt_preview}"
+
+    def _normalize_single_result(self, result: Any, target: AttackTarget, attack: Attack) -> AttackResult:
+        """Normalize a single PyRIT conversation result."""
+        from .pyrit_normalizer import PyritNormalizer
+
+        normalizer = PyritNormalizer(
+            pyrit_result=result,
+            db_path=self.settings.pyrit_db_path,
+            target_url=target.url,
+            attack_name=attack.name,
         )
+        return normalizer.normalize()
 
-        prompts = attack.config.get("prompts", [])
-        if not prompts:
-            raise ValueError("Dataset mode requires 'prompts' in attack config")
+    def _shutdown_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Drain and close the temporary event loop used by the synchronous runner."""
+        gc.collect()
 
-        scoring_config = AttackScoringConfig(objective_scorer=scorer)
+        if self.settings.pyrit_loop_shutdown_delay > 0:
+            loop.run_until_complete(asyncio.sleep(self.settings.pyrit_loop_shutdown_delay))
 
-        single_attack = PromptSendingAttack(
-            objective_target=objective_target,
-            attack_scoring_config=scoring_config,
-        )
+        pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        if pending_tasks:
+            logger.debug("Draining %d pending asyncio task(s)", len(pending_tasks))
+            loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
 
-        executor = AttackExecutor(max_concurrency=5)
-
-        print(f"[PyritRunner] Executing {len(prompts)} independent prompts in parallel (max 5 concurrent)...")
-
-        return await executor.execute_multi_objective_attack_async(
-            attack=single_attack,
-            objectives=prompts,
-        )
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        try:
+            loop.run_until_complete(loop.shutdown_default_executor())
+        except Exception:
+            pass
+        loop.close()

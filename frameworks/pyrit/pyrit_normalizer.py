@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 
 from pyrit.memory.central_memory import CentralMemory
@@ -6,6 +7,9 @@ from pyrit.models.attack_result import AttackOutcome
 from core.contracts.normalizer import Normalizer
 from datetime import datetime
 from core.models.attack_result import AttackResult, Conversation, ConversationTurn
+
+
+logger = logging.getLogger(__name__)
 
 class PyritNormalizer(Normalizer):
 
@@ -17,12 +21,11 @@ class PyritNormalizer(Normalizer):
         self.attack_name = attack_name
 
     def normalize(self) -> AttackResult:
-        print("[PyritNormaliser] Début de la normalisation.")
         memory = CentralMemory.get_memory_instance()
 
         active_ids = list(self.pyrit_result.get_active_conversation_ids())
         if not active_ids:
-            print("[PyritNormaliser] Aucun id trouvé.")
+            logger.warning("No active conversation id found during PyRIT normalization for attack '%s'", self.attack_name)
             return self._build_empty_result()
 
         turns = []
@@ -67,7 +70,6 @@ class PyritNormalizer(Normalizer):
             turns=turns
         )
 
-        print("[PyritNormaliser] Fin de la normalisation.")
 
         return AttackResult(
             framework="pyrit",
@@ -95,7 +97,7 @@ class PyritNormalizer(Normalizer):
 
 
     def _clear_db(self):
-        print("[PyritNormaliser] Nettoyage de la base de données.")
+        logger.debug("Cleaning PyRIT database at %s", self.db_path)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
@@ -103,8 +105,8 @@ class PyritNormalizer(Normalizer):
             cursor.execute("DELETE FROM ScoreEntries")
             cursor.execute("DELETE FROM AttackResultEntries")
             conn.commit()
-            print("[PyritNormaliser] Tables vidées avec succès.")
+            logger.debug("PyRIT database tables cleared successfully")
         except Exception as e:
-            print(f"[PyritNormaliser] Erreur lors du nettoyage : {e}")
+            logger.error("Failed to clean PyRIT database: %s", e)
         finally:
             conn.close()
