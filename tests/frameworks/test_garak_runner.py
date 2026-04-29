@@ -17,8 +17,19 @@ from frameworks.garak.garak_runner import GarakRunner
 
 
 class DummyTarget(AttackTarget):
-    def __init__(self):
-        super().__init__("Garak test target", "http://localhost:8000/api/chat")
+    def __init__(self, input_field: str = "prompt", output_field: str = "response"):
+        super().__init__(
+            "Garak test target",
+            "http://localhost:8000/api/chat",
+            input_field=input_field,
+            output_field=output_field,
+        )
+
+    def query(self, prompt: str):
+        return "dummy response"
+
+    def reset_history(self) -> None:
+        pass
 
 
 class DummyAttack(Attack):
@@ -92,6 +103,7 @@ class GarakRunnerTests(unittest.TestCase):
     def test_write_generator_config_writes_expected_rest_payload(self):
         runner = GarakRunner()
         target = DummyTarget()
+        attack = DummyAttack()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             runner.config_path = Path(tmp_dir) / "garak_config.json"
@@ -106,6 +118,23 @@ class GarakRunnerTests(unittest.TestCase):
         self.assertEqual(generator["response_json_field"], "response")
         self.assertEqual(generator["request_timeout"], runner.settings.garak_request_timeout)
         self.assertEqual(generator["headers"], {"Content-Type": "application/json"})
+
+    def test_write_generator_config_supports_custom_payload_fields(self):
+        runner = GarakRunner()
+        target = DummyTarget(
+            input_field="message",
+            output_field="answer",
+        )
+        attack = DummyAttack({"probe": "promptinject"})
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runner.config_path = Path(tmp_dir) / "garak_config.json"
+            runner._write_generator_config(target)
+            config = json.loads(runner.config_path.read_text(encoding="utf-8"))
+
+        generator = config["plugins"]["generators"]["rest"]["RestGenerator"]
+        self.assertEqual(generator["req_template"], '{"message": "$INPUT"}')
+        self.assertEqual(generator["response_json_field"], "answer")
 
 
 if __name__ == "__main__":

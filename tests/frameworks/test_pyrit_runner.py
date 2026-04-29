@@ -17,6 +17,12 @@ class DummyTarget(AttackTarget):
     def __init__(self):
         super().__init__("PyRIT test target", "http://localhost:8000/api/chat")
 
+    def query(self, prompt: str):
+        return "dummy response"
+
+    def reset_history(self) -> None:
+        pass
+
 
 class DummyAttack(Attack):
     def __init__(self, config: dict | None = None):

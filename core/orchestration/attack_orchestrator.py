@@ -15,7 +15,6 @@ class AttackOrchestrator:
         self,
         target: AttackTarget,
         campaign_name: str = "",
-        use_case_doc_path: str = None,
         attacks: list[Attack] = None,
         report_store: JsonReportStore | None = None,
         reset_target_between_attacks: bool = True,
@@ -23,7 +22,6 @@ class AttackOrchestrator:
         self.attacks = attacks or []
         self.target = target
         self.campaign_name = campaign_name
-        self.use_case_doc_path = use_case_doc_path
         self.report_store = report_store or JsonReportStore()
         self.reset_target_between_attacks = reset_target_between_attacks
         self.results: list[AttackResult] = []

@@ -2,15 +2,6 @@
 Campaign Loader
 ===============
 Parse a YAML campaign file and return a ready-to-run CampaignConfig.
-
-Attacks are defined in separate YAML files (the attack catalog)
-and referenced by path in the campaign file.
-
-Usage::
-
-    from core.application.campaign_loader import load_campaign
-
-    config = load_campaign("examples/campaign.yaml")
 """
 
 from __future__ import annotations
@@ -28,65 +19,69 @@ from frameworks.pyrit.pyrit_attack import PyritAttack
 
 logger = logging.getLogger(__name__)
 
-# ── Public API ───────────────────────────────────────────────────
+_REQUIRED_TOP_KEYS = {"target", "attacks"}
+_VALID_TOP_KEYS = {"campaign", "target", "attacks"}
+_VALID_FRAMEWORKS = {"pyrit", "garak"}
+
+
+
+####################################################################
+###                      Main method                             ###
+####################################################################
 
 def load_campaign(yaml_path: str | Path) -> CampaignConfig:
-    """Load a YAML campaign file and return a validated CampaignConfig.
-
-    Each entry in the ``attacks`` list must be a file path (string)
-    pointing to a standalone attack YAML file.
-    """
     path = Path(yaml_path)
     if not path.exists():
         raise FileNotFoundError(f"Campaign file not found: {path}")
 
+    # 1) Lire YAML campagne
     raw = _read_yaml(path)
-    _validate_top_level_keys(raw, path)
+    _validate_top_level(raw, path)
 
-    target_cfg = raw["target"]
-    _validate_target(target_cfg, path)
+    # 2) Verifier target minimal
+    target_cfg = _parse_target(raw["target"], path)
 
-    attacks_raw = raw.get("attacks") or []
-    if not attacks_raw:
-        raise ValueError(f"{path}: 'attacks' list must not be empty")
+    # 3) Charger les fichiers d'attaque
+    attacks = _load_attacks(raw.get("attacks"), path)
 
-    attacks = tuple(
-        _load_attack_from_file(entry, index, path)
-        for index, entry in enumerate(attacks_raw)
-    )
+    # 4) Instancier PyritAttack / GarakAttack (fait dans _load_attacks)
 
+    # 5) Retourner CampaignConfig
     campaign_meta = raw.get("campaign", {})
-    use_case_doc = target_cfg.get("use_case_doc", "")
-
     logger.info(
         "Loaded campaign '%s' — %d attack(s) targeting '%s'",
         campaign_meta.get("name", path.stem),
         len(attacks),
         target_cfg["name"],
     )
-
     return CampaignConfig(
         campaign_name=campaign_meta.get("name", path.stem),
         target_name=target_cfg["name"],
-        target_url=target_cfg["url"],
-        use_case_doc_path=use_case_doc,
+        target_chat_url=target_cfg["chat_url"],
+        target_reset_memory_url=target_cfg["reset_memory_url"],
+        target_input_field=target_cfg["input_field"],
+        target_output_field=target_cfg["output_field"],
         active_attacks=attacks,
     )
 
 
+
+
+
+####################################################################
+###                      Helper Methods                          ###
+####################################################################
+
+
+
 def load_attack(yaml_path: str | Path) -> Attack:
-    """Load a single attack from its own YAML file."""
     path = Path(yaml_path)
     if not path.exists():
         raise FileNotFoundError(f"Attack file not found: {path}")
-    entry = _read_yaml(path)
-    return _build_attack(entry, 0, path)
+    return _build_attack(_read_yaml(path), 0, path)
 
-
-# ── YAML reading ─────────────────────────────────────────────────
 
 def _read_yaml(path: Path) -> dict:
-    """Read and parse a YAML file, returning the top-level dict."""
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
@@ -94,15 +89,11 @@ def _read_yaml(path: Path) -> dict:
     return data
 
 
-# ── Validation helpers ───────────────────────────────────────────
-
-_REQUIRED_TOP_KEYS = {"target", "attacks"}
-_VALID_TOP_KEYS = {"campaign", "target", "attacks"}
-
-def _validate_top_level_keys(raw: dict, path: Path) -> None:
+def _validate_top_level(raw: dict, path: Path) -> None:
     missing = _REQUIRED_TOP_KEYS - raw.keys()
     if missing:
         raise ValueError(f"{path}: missing required top-level key(s): {', '.join(sorted(missing))}")
+
     unknown = set(raw.keys()) - _VALID_TOP_KEYS
     if unknown:
         raise ValueError(
@@ -111,62 +102,84 @@ def _validate_top_level_keys(raw: dict, path: Path) -> None:
         )
 
 
-def _validate_target(target_cfg: dict, path: Path) -> None:
-    for key in ("name", "url"):
-        if key not in target_cfg:
-            raise ValueError(f"{path}: target.{key} is required")
-    url = target_cfg["url"]
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(f"{path}: target.url must start with http:// or https://")
+def _parse_target(target_cfg: dict, path: Path) -> dict[str, str]:
+    if "name" not in target_cfg:
+        raise ValueError(f"{path}: target.name is required")
+
+    chat_url = target_cfg.get("chat_url") or target_cfg.get("url")
+    if not chat_url:
+        raise ValueError(f"{path}: target.chat_url is required (or legacy target.url)")
+    if not chat_url.startswith(("http://", "https://")):
+        raise ValueError(f"{path}: target.chat_url must start with http:// or https://")
+
+    reset_memory_url = target_cfg.get("reset_memory_url", "")
+    if reset_memory_url and not reset_memory_url.startswith(("http://", "https://")):
+        raise ValueError(f"{path}: target.reset_memory_url must start with http:// or https://")
+
+    input_field = target_cfg.get("input_field", "prompt")
+    if not isinstance(input_field, str) or not input_field.strip():
+        raise ValueError(f"{path}: target.input_field must be a non-empty string")
+    if "$INPUT" in input_field or any(ch in input_field for ch in "{}:\\"):
+        raise ValueError(f"{path}: target.input_field must be a single input field name (ex: 'prompt')")
+
+    output_field = target_cfg.get("output_field", "response")
+    if not isinstance(output_field, str) or not output_field.strip():
+        raise ValueError(f"{path}: target.output_field must be a non-empty string")
+
+    return {
+        "name": target_cfg["name"],
+        "chat_url": chat_url,
+        "reset_memory_url": reset_memory_url,
+        "input_field": input_field,
+        "output_field": output_field,
+    }
 
 
-# ── Attack loading ───────────────────────────────────────────────
+def _load_attacks(attacks_raw: Any, campaign_path: Path) -> tuple[Attack, ...]:
+    refs = attacks_raw or []
+    if not refs:
+        raise ValueError(f"{campaign_path}: 'attacks' list must not be empty")
 
-_VALID_FRAMEWORKS = {"pyrit", "garak"}
+    attacks: list[Attack] = []
+    for index, ref in enumerate(refs):
+        if not isinstance(ref, str):
+            raise ValueError(
+                f"{campaign_path}: attacks[{index}] must be a file path (string), "
+                f"got {type(ref).__name__}"
+            )
 
-def _load_attack_from_file(ref: Any, index: int, campaign_path: Path) -> Attack:
-    """Load an attack from an external YAML file referenced in the campaign."""
-    if not isinstance(ref, str):
-        raise ValueError(
-            f"{campaign_path}: attacks[{index}] must be a file path (string), "
-            f"got {type(ref).__name__}"
-        )
+        attack_path = Path(ref)
+        if not attack_path.exists():
+            attack_path = campaign_path.parent / ref
+        if not attack_path.exists():
+            raise FileNotFoundError(
+                f"{campaign_path}: attacks[{index}] references '{ref}' — file not found. "
+                f"Looked in: '{Path(ref).resolve()}' and '{(campaign_path.parent / ref).resolve()}'"
+            )
 
-    attack_path = Path(ref)
-    if not attack_path.exists():
-        attack_path = campaign_path.parent / ref
-    if not attack_path.exists():
-        raise FileNotFoundError(
-            f"{campaign_path}: attacks[{index}] references '{ref}' — file not found. "
-            f"Looked in: '{Path(ref).resolve()}' and '{(campaign_path.parent / ref).resolve()}'"
-        )
+        logger.debug("Loading attack[%d] from file: %s", index, attack_path)
+        attacks.append(_build_attack(_read_yaml(attack_path), index, attack_path))
 
-    logger.debug("Loading attack[%d] from file: %s", index, attack_path)
-    entry = _read_yaml(attack_path)
-    return _build_attack(entry, index, attack_path)
+    return tuple(attacks)
 
-
-# ── Attack builders ──────────────────────────────────────────────
 
 def _build_attack(entry: dict[str, Any], index: int, path: Path) -> Attack:
-    """Build a single Attack instance from a parsed YAML dict."""
-    fw = entry.get("framework", "")
-    if fw not in _VALID_FRAMEWORKS:
+    framework = entry.get("framework", "")
+    if framework not in _VALID_FRAMEWORKS:
         raise ValueError(
-            f"{path}: attacks[{index}].framework must be one of {sorted(_VALID_FRAMEWORKS)}, got '{fw}'"
+            f"{path}: attacks[{index}].framework must be one of {sorted(_VALID_FRAMEWORKS)}, got '{framework}'"
         )
+
     intent = entry.get("intent", "")
     if not intent:
         raise ValueError(f"{path}: attacks[{index}].intent is required")
 
-    if fw == "pyrit":
+    if framework == "pyrit":
         return _build_pyrit_attack(entry, index, path)
-    else:
-        return _build_garak_attack(entry, index, path)
+    return _build_garak_attack(entry, index, path)
 
 
 def _build_pyrit_attack(entry: dict[str, Any], index: int, path: Path) -> PyritAttack:
-    """Build a PyritAttack from YAML fields."""
     orchestrator = entry.get("orchestrator", "")
     if not orchestrator:
         raise ValueError(f"{path}: attacks[{index}].orchestrator is required for pyrit attacks")
@@ -197,13 +210,17 @@ def _build_pyrit_attack(entry: dict[str, Any], index: int, path: Path) -> PyritA
 
 
 def _build_garak_attack(entry: dict[str, Any], index: int, path: Path) -> GarakAttack:
-    """Build a GarakAttack from YAML fields."""
     probe = entry.get("probe", "")
     if not probe:
         raise ValueError(f"{path}: attacks[{index}].probe is required for garak attacks")
 
-    config: dict[str, Any] = {"probe": probe}
+    forbidden_keys = [k for k in ("input_field", "output_field", "req_template", "response_json_field") if k in entry]
+    if forbidden_keys:
+        raise ValueError(
+            f"{path}: {', '.join(forbidden_keys)} must be configured in campaign.target, not in attack files"
+        )
 
+    config: dict[str, Any] = {"probe": probe}
     if "report_prefix" in entry:
         config["report_prefix"] = entry["report_prefix"]
 
@@ -211,7 +228,6 @@ def _build_garak_attack(entry: dict[str, Any], index: int, path: Path) -> GarakA
 
 
 def _build_scoring_question(scoring: dict[str, str], index: int, path: Path):
-    """Build a TrueFalseQuestion from the YAML scoring block."""
     for key in ("true_description", "false_description", "category"):
         if key not in scoring:
             raise ValueError(f"{path}: attacks[{index}].scoring.{key} is required")

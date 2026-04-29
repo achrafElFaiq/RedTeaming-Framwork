@@ -16,3 +16,5 @@ intent: "REMPLACER_par_un_identifiant_unique"       # ex: "promptinject_scan"
 probe: "REMPLACER_par_le_nom_de_la_probe"           # ex: "promptinject", "test.Blank"
 report_prefix: "reports/REMPLACER_prefixe"          # ex: "reports/garak_promptinject"
 
+# Les paramètres d'API cible (payload/field de réponse) se configurent dans campaign.target
+# pour toute la campagne, pas ici.

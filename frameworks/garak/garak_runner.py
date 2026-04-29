@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 class GarakRunner(Runner):
     """Run Garak attacks and normalize the generated report into framework results."""
 
+    _DEFAULT_INPUT_FIELD = "prompt"
+    _DEFAULT_OUTPUT_FIELD = "response"
+
     def __init__(self):
         self.settings = get_runtime_settings(frameworks={"garak"})
         self.garak_reports_dir = Path(self.settings.garak_reports_dir)
@@ -40,15 +43,18 @@ class GarakRunner(Runner):
     def _write_generator_config(self, target: AttackTarget) -> None:
         """Write the Garak REST generator config pointing to the framework target."""
         self.config_path.parent.mkdir(exist_ok=True)
+        input_field = getattr(target, "input_field", self._DEFAULT_INPUT_FIELD) or self._DEFAULT_INPUT_FIELD
+        output_field = getattr(target, "output_field", self._DEFAULT_OUTPUT_FIELD)
+        req_template = json.dumps({input_field: "$INPUT"})
         config = {
             "plugins": {
                 "generators": {
                     "rest": {
                         "RestGenerator": {
                             "uri": target.url,
-                            "req_template": '{"prompt": "$INPUT"}',
+                            "req_template": req_template,
                             "response_json": True,
-                            "response_json_field": "response",
+                            "response_json_field": output_field,
                             "request_timeout": self.settings.garak_request_timeout,
                             "headers": {
                                 "Content-Type": "application/json"
@@ -73,7 +79,7 @@ class GarakRunner(Runner):
     def _build_garak_command(self, target: AttackTarget, attack: Attack, report_prefix: str) -> list[str]:
         """Build the Garak CLI command for the current target and probe."""
         return [
-            "python3",
+            "python",
             "-m",
             "garak",
             "--target_type",
@@ -125,5 +131,3 @@ class GarakRunner(Runner):
 
         logger.error("Garak raw report was not found for attack '%s'", attack.name)
         raise FileNotFoundError(f"Garak report file not found at {report_path}")
-
-

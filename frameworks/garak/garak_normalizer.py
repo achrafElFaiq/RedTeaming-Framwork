@@ -1,3 +1,23 @@
+"""
+GarakNormalizer — Converts Garak's JSONL report into the framework's internal AttackResult format.
+===================================================================================================
+
+Garak outputs results as a JSONL file (one JSON object per line), where each line is either:
+  - an "init" entry  : contains run metadata (start time, config)
+  - an "attempt" entry : contains one probe attempt (prompt, outputs, detector results)
+
+Pipeline:
+  1. Open and iterate the JSONL report file line by line.
+  2. Parse the "init" entry to extract the run timestamp.
+  3. For each "attempt" entry, extract: probe name, prompt text, model outputs, and detector scores.
+  4. For each output, determine pass/fail: score == 0.0 → passed, score > 0.0 → failed (breach detected).
+  5. Build a PromptResult per output and accumulate into a list.
+  6. Wrap everything into a standard AttackResult (framework-agnostic), ready for storage and rendering.
+
+Output: An AttackResult with a list of PromptResults (one per probe output), stored by JsonReportStore
+        and rendered in the RedTrace dashboard under the Garak "View probes" section.
+"""
+
 import json
 from datetime import datetime
 from pathlib import Path

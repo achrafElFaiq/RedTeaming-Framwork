@@ -1,11 +1,29 @@
+"""
+PyritNormalizer — Converts PyRIT attack results into the framework's internal AttackResult format.
+==================================================================================================
+
+Pipeline:
+  1. Retrieve active conversation IDs from the raw PyritAttackResult.
+  2. For each conversation, fetch message pieces from PyRIT's central SQLite memory store.
+  3. Iterate user/assistant pairs → extract score (breach detected?) + rationale → build ConversationTurns.
+  4. Wrap turns into a Conversation (objective, achieved, turns), then into a standard AttackResult.
+
+Edge cases:
+  - No active conversation IDs → returns an empty result (achieved=False, no turns).
+  - _clear_db() (commented out) can wipe PyRIT's SQLite tables between runs to avoid state pollution.
+
+Output: A framework-agnostic AttackResult, ready to be stored by JsonReportStore and rendered in RedTrace.
+"""
+
+from datetime import datetime
 import logging
 import sqlite3
 
 from pyrit.memory.central_memory import CentralMemory
 from pyrit.models.attack_result import AttackResult as PyritAttackResult
 from pyrit.models.attack_result import AttackOutcome
+
 from core.contracts.normalizer import Normalizer
-from datetime import datetime
 from core.models.attack_result import AttackResult, Conversation, ConversationTurn
 
 

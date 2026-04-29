@@ -20,6 +20,9 @@ class DummyTarget(AttackTarget):
         super().__init__("Test target", "http://localhost:8000/api/chat")
         self.reset_count = 0
 
+    def query(self, prompt: str):
+        return "dummy response"
+
     def reset_history(self):
         self.reset_count += 1
 
@@ -59,7 +62,7 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_orchestrator_has_empty_state_by_default(self):
         target = DummyTarget()
         report_store = FakeReportStore()
-        orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md", report_store=report_store)
+        orchestrator = AttackOrchestrator(target=target, report_store=report_store)
 
         self.assertEqual(orchestrator.result_count, 0)
         self.assertEqual(orchestrator.report_count, 0)
@@ -84,7 +87,7 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_execute_attacks_aggregates_normalized_results_in_order(self):
         target = DummyTarget()
         report_store = FakeReportStore()
-        orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md", report_store=report_store)
+        orchestrator = AttackOrchestrator(target=target, report_store=report_store)
 
         result_a = AttackResult(
             framework="dummy",
@@ -139,7 +142,7 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_has_failures_detects_failed_prompt_results(self):
         target = DummyTarget()
         report_store = FakeReportStore()
-        orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md", report_store=report_store)
+        orchestrator = AttackOrchestrator(target=target, report_store=report_store)
 
         failed_result = AttackResult(
             framework="dummy",
@@ -167,7 +170,7 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_execute_attacks_collects_technical_failures_and_continues(self):
         target = DummyTarget()
         report_store = FakeReportStore()
-        orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md", report_store=report_store)
+        orchestrator = AttackOrchestrator(target=target, report_store=report_store)
 
         success_result = AttackResult(
             framework="dummy",
@@ -206,8 +209,15 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_orchestrator_default_report_store_uses_runtime_reports_dir(self):
         target = DummyTarget()
 
-        with patch.dict(os.environ, {"JSON_REPORTS_DIR": "/tmp/orchestrator-reports"}, clear=True):
-            orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md")
+        with patch.dict(
+            os.environ,
+            {
+                "JSON_REPORTS_DIR": "/tmp/orchestrator-reports",
+                "DEFAULT_TARGET_URL": "http://localhost:8000/api/chat",
+            },
+            clear=True,
+        ):
+            orchestrator = AttackOrchestrator(target=target)
 
         self.assertIsInstance(orchestrator.report_store, JsonReportStore)
         self.assertEqual(orchestrator.report_store.reports_dir, Path("/tmp/orchestrator-reports"))
@@ -215,7 +225,7 @@ class AttackOrchestratorTests(unittest.TestCase):
     def test_execute_attacks_logs_attack_start_with_attack_tag(self):
         target = DummyTarget()
         report_store = FakeReportStore()
-        orchestrator = AttackOrchestrator(target=target, use_case_doc_path="dummy.md", report_store=report_store)
+        orchestrator = AttackOrchestrator(target=target, report_store=report_store)
 
         attack = DummyAttack(
             "logged",
@@ -237,5 +247,4 @@ class AttackOrchestratorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

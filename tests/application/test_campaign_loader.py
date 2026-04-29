@@ -140,22 +140,6 @@ def test_load_campaign_multiple_files(tmp_yaml, tmp_path):
     assert config.active_attacks[1].framework == "garak"
 
 
-def test_use_case_doc_optional(tmp_yaml, tmp_path):
-    _write_attack(tmp_path, "attacks", "g.yaml", """
-        framework: garak
-        intent: probe
-        probe: test.Blank
-    """)
-    campaign = tmp_yaml("""
-        target:
-          name: Bot
-          url: http://localhost:8000/api/chat
-        attacks:
-          - attacks/g.yaml
-    """)
-    config = load_campaign(campaign)
-    assert config.use_case_doc_path == ""
-
 
 # ═════════════════════════════════════════════════════════════════
 # load_attack (standalone)
@@ -333,4 +317,115 @@ def test_unknown_top_level_key(tmp_yaml):
         extra_key: bad
     """)
     with pytest.raises(ValueError, match="unknown top-level key"):
+        load_campaign(campaign)
+
+
+def test_target_chat_url_and_optional_reset_memory_url(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "g.yaml", """
+        framework: garak
+        intent: probe
+        probe: test.Blank
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          chat_url: http://localhost:8000/api/chat
+          reset_memory_url: http://localhost:8000/api/reset
+        attacks:
+          - attacks/g.yaml
+    """)
+    config = load_campaign(campaign)
+    assert config.target_chat_url == "http://localhost:8000/api/chat"
+    assert config.target_reset_memory_url == "http://localhost:8000/api/reset"
+
+
+def test_target_legacy_url_is_still_supported(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "g.yaml", """
+        framework: garak
+        intent: probe
+        probe: test.Blank
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          url: http://localhost:8000/api/chat
+        attacks:
+          - attacks/g.yaml
+    """)
+    config = load_campaign(campaign)
+    assert config.target_chat_url == "http://localhost:8000/api/chat"
+    assert config.target_url == "http://localhost:8000/api/chat"
+
+
+def test_invalid_reset_memory_url_rejected(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "g.yaml", """
+        framework: garak
+        intent: probe
+        probe: test.Blank
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          chat_url: http://localhost:8000/api/chat
+          reset_memory_url: ftp://localhost/reset
+        attacks:
+          - attacks/g.yaml
+    """)
+    with pytest.raises(ValueError, match="target.reset_memory_url must start with http:// or https://"):
+        load_campaign(campaign)
+
+
+def test_target_transport_template_and_response_field(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "garak_custom.yaml", """
+        framework: garak
+        intent: custom_probe
+        probe: promptinject
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          chat_url: http://localhost:8000/api/chat
+          input_field: message
+          output_field: answer
+        attacks:
+          - attacks/garak_custom.yaml
+    """)
+    config = load_campaign(campaign)
+    assert config.target_input_field == "message"
+    assert config.target_output_field == "answer"
+
+
+def test_target_input_field_must_be_single_field_name(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "garak_bad.yaml", """
+        framework: garak
+        intent: bad_probe
+        probe: promptinject
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          chat_url: http://localhost:8000/api/chat
+          input_field: '{"message": "$INPUT"}'
+        attacks:
+          - attacks/garak_bad.yaml
+    """)
+    with pytest.raises(ValueError, match="target.input_field must be a single input field name"):
+        load_campaign(campaign)
+
+
+def test_garak_attack_rejects_transport_keys(tmp_yaml, tmp_path):
+    _write_attack(tmp_path, "attacks", "garak_bad.yaml", """
+        framework: garak
+        intent: bad_probe
+        probe: promptinject
+        req_template: message
+    """)
+    campaign = tmp_yaml("""
+        target:
+          name: Bot
+          chat_url: http://localhost:8000/api/chat
+        attacks:
+          - attacks/garak_bad.yaml
+    """)
+    with pytest.raises(ValueError, match="must be configured in campaign.target"):
         load_campaign(campaign)

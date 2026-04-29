@@ -102,7 +102,13 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("─" * 60)
     logger.info("[Config] Campaign  : %s", config.campaign_name or args.campaign)
-    logger.info("[Config] Target    : %s → %s", config.target_name, config.target_url)
+    logger.info("[Config] Target    : %s → %s", config.target_name, config.target_chat_url)
+    if config.target_reset_memory_url:
+        logger.info("[Config] Target reset URL : %s", config.target_reset_memory_url)
+    else:
+        logger.info("[Config] Target reset URL : (disabled)")
+    logger.info("[Config] Target input field : %s", config.target_input_field)
+    logger.info("[Config] Target output field: %s", config.target_output_field)
     logger.info("[Config] Attacks   : %d", len(config.active_attacks))
     for i, atk in enumerate(config.active_attacks, 1):
         mode = atk.config.get("orchestrator", atk.config.get("probe", "?"))
@@ -124,11 +130,16 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("[Preflight] Skipped (--skip-checks)")
 
     # ── Build orchestrator ─────────────────────────────────────
-    target = AttackTarget(config.target_name, config.target_url)
+    target = AttackTarget(
+        config.target_name,
+        config.target_chat_url,
+        config.target_reset_memory_url or None,
+        config.target_input_field,
+        config.target_output_field,
+    )
     orchestrator = AttackOrchestrator(
         target=target,
         campaign_name=config.campaign_name,
-        use_case_doc_path=config.use_case_doc_path or None,
     )
     for attack in config.active_attacks:
         orchestrator.add_attack(attack)

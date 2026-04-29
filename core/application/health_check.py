@@ -40,7 +40,12 @@ def run_preflight_checks(config: CampaignConfig) -> list[str]:
     logger.info("[Preflight] Checking components for frameworks: %s", ", ".join(sorted(frameworks)))
 
     # ── Target health check (always) ──────────────────────────
-    issues.extend(_check_target(config.target_url))
+    issues.extend(
+        _check_target(
+            config.target_chat_url,
+            config.target_input_field,
+        )
+    )
 
     # ── PyRIT-specific checks ─────────────────────────────────
     if "pyrit" in frameworks:
@@ -71,13 +76,15 @@ def _detect_frameworks(config: CampaignConfig) -> set[str]:
 # Target check
 # ─────────────────────────────────────────────────────────────────
 
-def _check_target(target_url: str) -> list[str]:
+def _check_target(target_url: str, input_field: str) -> list[str]:
     """Verify the target endpoint is reachable."""
     logger.info("[Preflight] Checking target: %s", target_url)
+    payload = {input_field: "health check"}
+
     try:
         resp = requests.post(
             target_url,
-            json={"prompt": "health check"},
+            json=payload,
             timeout=(5, 10),
         )
         if resp.status_code < 500:

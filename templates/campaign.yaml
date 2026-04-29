@@ -20,8 +20,10 @@ campaign:
 # ── Cible à attaquer ─────────────────────────────────────────
 target:
   name: "REMPLACER — Nom lisible de la cible"       # ex: "CustomerBot SIA"
-  url: "http://localhost:8000/api/chat"              # endpoint HTTP de la cible
-  # use_case_doc: "chemin/vers/doc.md"               # optionnel
+  chat_url: "http://localhost:8000/api/chat"        # endpoint HTTP qui reçoit les prompts
+  # reset_memory_url: "http://localhost:8000/api/reset"  # optionnel (si la cible garde un contexte)
+  input_field: "prompt"                             # nom du champ d'entrée string
+  output_field: "response"                          # nom du champ de sortie JSON
 
 # ── Attaques à exécuter (dans l'ordre) ───────────────────────
 # Chaque ligne est un chemin vers un fichier d'attaque YAML.
@@ -31,4 +33,3 @@ attacks:
   - attack_catalog/pyrit/REMPLACER.yaml
   - attack_catalog/garak/REMPLACER.yaml
   # Ajouter autant d'attaques que nécessaire...
-
