@@ -21,8 +21,17 @@ env/
 # Local test artifacts
 test.json
 
-# Report folder
+# Generated reports (runtime output)
 reports/
+
+# Generated Garak config (auto-generated before each run)
+config/garak_config.json
+
+# PyRIT database
+*.db
+
+# Internal scripts (enterprise auth — not published)
+scripts/
 
 # Campaigns & attack catalog (contain confidential attack data)
 campaigns/
@@ -37,3 +46,4 @@ use_cases/
 orange_use_cases/
 
 strategy.md
+AUDIT.md

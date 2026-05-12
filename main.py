@@ -5,8 +5,8 @@ RedTeaming Framework
 Usage::
 
     python main.py <campaign.yaml>
-    python main.py examples/campaigns/use_cases/use_case1/smoke_test.yaml --log-level DEBUG
-    python main.py examples/campaigns/use_cases/use_case1/smoke_test.yaml --skip-checks
+    python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml --log-level DEBUG
+    python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml --skip-checks
 """
 
 import argparse
@@ -141,13 +141,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Build orchestrator ─────────────────────────────────────
     target = AttackTarget(
-        config.target_name,
-        config.target_chat_url,
-        config.target_reset_memory_url or None,
-        config.target_input_field,
-        config.target_output_field,
-        config.target_model,
-        config.target_architecture_type,
+        name=config.target_name,
+        chat_url=config.target_chat_url,
+        reset_memory_url=config.target_reset_memory_url or None,
+        input_field=config.target_input_field,
+        output_field=config.target_output_field,
+        model=config.target_model,
+        architecture_type=config.target_architecture_type,
     )
     orchestrator = AttackOrchestrator(
         target=target,
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
 def _launch_dashboard(logger: logging.Logger) -> None:
     """Launch the Streamlit dashboard in a subprocess."""
     logger.info("─" * 50)
-    logger.info("[Dashboard] Lancement du dashboard RedTeaming Framework...")
+    logger.info("[Dashboard] Launching RedTeaming Framework dashboard...")
     logger.info("[Dashboard] Local   : http://localhost:8501")
     logger.info("─" * 50)
     try:
@@ -197,11 +197,11 @@ def _launch_dashboard(logger: logging.Logger) -> None:
             env={**os.environ, "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false"},
         )
     except KeyboardInterrupt:
-        logger.info("[Dashboard] Dashboard arrêté par l'utilisateur")
+        logger.info("[Dashboard] Dashboard stopped by user")
     except FileNotFoundError:
         logger.error(
-            "[Dashboard] Streamlit n'est pas installé. "
-            "Installez-le avec : pip install streamlit"
+            "[Dashboard] Streamlit is not installed. "
+            "Install it with: pip install streamlit"
         )
 
 

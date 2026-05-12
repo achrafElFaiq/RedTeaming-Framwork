@@ -222,7 +222,6 @@ class AttackOrchestratorTests(unittest.TestCase):
             os.environ,
             {
                 "JSON_REPORTS_DIR": "/tmp/orchestrator-reports",
-                "DEFAULT_TARGET_URL": "http://localhost:8000/api/chat",
             },
             clear=True,
         ):

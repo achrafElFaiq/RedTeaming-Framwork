@@ -162,7 +162,7 @@ class PyritRunnerTests(unittest.TestCase):
         attack = DummyAttack()
         dataset_results = [SimpleNamespace(objective="one"), SimpleNamespace(objective="two")]
 
-        with patch.object(runner, "_normalize_dataset_list_results", return_value=["r1", "r2"]) as normalize_mock:
+        with patch.object(runner, "_normalize_dataset_batch", return_value=["r1", "r2"]) as normalize_mock:
             results = runner._normalize_results(dataset_results, target, attack)
 
         self.assertEqual(results, ["r1", "r2"])

@@ -376,7 +376,6 @@ def test_target_legacy_url_is_still_supported(tmp_yaml, tmp_path):
     """)
     config = load_campaign(campaign)
     assert config.target_chat_url == "http://localhost:8000/api/chat"
-    assert config.target_url == "http://localhost:8000/api/chat"
 
 
 def test_invalid_reset_memory_url_rejected(tmp_yaml, tmp_path):

@@ -1,5 +1,6 @@
 import logging
 import subprocess
+import sys
 import json
 from pathlib import Path
 
@@ -79,7 +80,7 @@ class GarakRunner(Runner):
     def _build_garak_command(self, target: AttackTarget, attack: Attack, report_prefix: str) -> list[str]:
         """Build the Garak CLI command for the current target and probe."""
         return [
-            "python",
+            sys.executable,
             "-m",
             "garak",
             "--target_type",

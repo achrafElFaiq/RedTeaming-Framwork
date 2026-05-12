@@ -222,25 +222,22 @@ class PyritRunner(Runner):
         """Convert the PyRIT backend result into framework-level attack results."""
 
         if isinstance(result, list):
-            normalized_results = self._normalize_dataset_list_results(result, target, attack)
-        elif isinstance(result, AttackExecutorResult):
-            normalized_results = self._normalize_dataset_results(result, target, attack)
-        else:
-            normalized_results = [self._normalize_single_result(result, target, attack)]
+            return self._normalize_dataset_batch(result, target, attack)
+        if isinstance(result, AttackExecutorResult):
+            return self._normalize_dataset_batch(result.completed_results, target, attack)
+        return [self._normalize_single_result(result, target, attack)]
 
-        return normalized_results
-
-    def _normalize_dataset_list_results(
+    def _normalize_dataset_batch(
         self,
-        result: list[Any],
+        items: list[Any],
         target: AttackTarget,
         attack: Attack,
     ) -> list[AttackResult]:
-        """Normalize a sequential dataset execution into one result per prompt."""
+        """Normalize a list of dataset results into one AttackResult per prompt."""
         from .pyrit_normalizer import PyritNormalizer
 
-        normalized_results: list[AttackResult] = []
-        for index, individual_result in enumerate(result):
+        normalized: list[AttackResult] = []
+        for index, individual_result in enumerate(items):
             attack_name = self._build_dataset_attack_name(attack.name, individual_result.objective, index)
             normalizer = PyritNormalizer(
                 pyrit_result=individual_result,
@@ -248,32 +245,9 @@ class PyritRunner(Runner):
                 target_url=target.url,
                 attack_name=attack_name,
             )
-            normalized_results.append(normalizer.normalize())
+            normalized.append(normalizer.normalize())
 
-        return normalized_results
-
-    def _normalize_dataset_results(
-        self,
-        result: AttackExecutorResult,
-        target: AttackTarget,
-        attack: Attack,
-    ) -> list[AttackResult]:
-        """Normalize a dataset execution into one result per completed objective."""
-        from .pyrit_normalizer import PyritNormalizer
-
-
-        normalized_results: list[AttackResult] = []
-        for index, individual_result in enumerate(result.completed_results):
-            attack_name = self._build_dataset_attack_name(attack.name, individual_result.objective, index)
-            normalizer = PyritNormalizer(
-                pyrit_result=individual_result,
-                db_path=self.settings.pyrit_db_path,
-                target_url=target.url,
-                attack_name=attack_name,
-            )
-            normalized_results.append(normalizer.normalize())
-
-        return normalized_results
+        return normalized
 
     def _build_dataset_attack_name(self, base_attack_name: str, objective: str, index: int) -> str:
         """Build a stable readable attack name for one dataset objective result."""

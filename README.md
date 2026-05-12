@@ -41,13 +41,17 @@ campaign YAML
 ```text
 .
 ├── main.py                  # CLI entrypoint
+├── requirements.txt         # Python dependencies
 ├── src/                     # source code
 │   ├── settings.py          # runtime settings loaded from .env
 │   ├── core/                # campaign loading, orchestration, reporting
 │   └── frameworks/          # PyRIT and Garak integrations
 ├── examples/                # example campaigns, attacks, templates
+│   ├── attacks/             # attack YAML catalog (R1–R5)
+│   ├── campaigns/           # ready-to-run campaign YAMLs
+│   └── templates/           # skeletons for new campaigns and attacks
 ├── config/                  # runtime config files (e.g. generated Garak config)
-├── reports/                 # generated JSON reports
+├── reports/                 # generated JSON reports (gitignored)
 ├── tests/                   # test suite
 ├── .env.example             # environment variable template
 └── README.md
@@ -59,26 +63,11 @@ campaign YAML
 
 You need:
 
-- Python 3
+- **Python ≥ 3.11**
 - a virtual environment
 - a target HTTP endpoint to test
-- the Python packages used by the repo
 - PyRIT if you want to run PyRIT campaigns
 - Garak if you want to run Garak campaigns
-- Streamlit if you want to use the dashboard
-
-This repository currently does **not** expose a pinned dependency manifest in the root, so install the dependencies required by your environment manually.
-
-At minimum, the codebase uses packages such as:
-
-- `python-dotenv`
-- `pydantic`
-- `requests`
-- `PyYAML`
-- `streamlit`
-- `pytest`
-- `pyrit`
-- `garak`
 
 ---
 
@@ -89,6 +78,19 @@ At minimum, the codebase uses packages such as:
 ```zsh
 python3 -m venv .venv
 source .venv/bin/activate
+```
+
+### Install dependencies
+
+```zsh
+pip install -r requirements.txt
+```
+
+PyRIT and Garak are optional — uncomment them in `requirements.txt` or install separately:
+
+```zsh
+pip install pyrit   # for PyRIT campaigns
+pip install garak   # for Garak campaigns
 ```
 
 ### Copy the environment template
@@ -110,15 +112,28 @@ The main variables are:
   - `PYRIT_SCORER_MODEL`
   - `PYRIT_SCORER_API_KEY`
 - **PyRIT runtime**
-  - `PYRIT_DB_PATH`
-- **Always required**
-  - `DEFAULT_TARGET_URL`
-  - `JSON_REPORTS_DIR`
+  - `PYRIT_DB_PATH` (default: `pyrit.db`)
+- **Reports**
+  - `JSON_REPORTS_DIR` (default: `reports`)
 - **Garak**
   - `GARAK_REPORTS_DIR`
   - `GARAK_CONFIG_PATH`
 
 See `.env.example` for comments and defaults.
+
+### Dynamic API key resolution (enterprise)
+
+If your environment requires refreshing API tokens at runtime (e.g., JWT via an
+identity provider), set the `*_API_KEY_COMMAND` variables instead of — or in
+addition to — the static `*_API_KEY` ones:
+
+```dotenv
+PYRIT_ATTACKER_API_KEY_COMMAND="python scripts/get_token.py"
+PYRIT_SCORER_API_KEY_COMMAND="python scripts/get_token.py"
+```
+
+When a `*_COMMAND` variable is set, the framework executes the command and uses
+its stdout as the API key, ignoring the static value.
 
 ---
 
@@ -127,15 +142,21 @@ See `.env.example` for comments and defaults.
 Run an example campaign:
 
 ```zsh
-python main.py "examples/campaigns/R1-Prompt Leakage/prompt_leakeage.yaml"
+python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml
 ```
 
 Useful variants:
 
 ```zsh
-python main.py "examples/campaigns/R1-Prompt Leakage/prompt_leakeage.yaml" --log-level DEBUG
-python main.py "examples/campaigns/R1-Prompt Leakage/prompt_leakeage.yaml" --skip-checks
-python main.py "examples/campaigns/R1-Prompt Leakage/prompt_leakeage.yaml" --no-dashboard
+python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml --log-level DEBUG
+python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml --skip-checks
+python main.py examples/campaigns/R1-prompt-leakage/prompt_leakage.yaml --no-dashboard
+```
+
+To launch the dashboard independently on existing reports:
+
+```zsh
+streamlit run src/core/results/report_viewer.py
 ```
 
 By default, after a campaign run:
@@ -172,8 +193,8 @@ target:
   output_field: "response"
 
 attacks:
-  - examples/attacks/some_attack.yaml
-  - examples/attacks/another_attack.yaml
+  - examples/attacks/R1-prompt-leakage/r1_pyrit_direct_request.yaml
+  - examples/attacks/R3-jailbreaking-guardrail-bypass/r3_pyrit_fictional_world.yaml
 ```
 
 ### Target fields
@@ -192,6 +213,15 @@ Each item in `attacks:` is a path to an attack YAML file.
 
 Paths are expected relative to the **project root**.
 
+### Attack templates
+
+See `examples/templates/` for editable attack skeletons:
+
+- `attack_pyrit_dataset.yaml` — single-shot prompt list
+- `attack_pyrit_crescendo.yaml` — multi-turn crescendo
+- `attack_pyrit_red_teaming.yaml` — objective-driven red teaming
+- `attack_garak.yaml` — Garak probe
+
 ---
 
 ## 7. Supported attack modes
@@ -200,13 +230,13 @@ Paths are expected relative to the **project root**.
 
 - executes a list of prompts
 - treats prompts as independent objectives
-- currently supports reset between prompts when configured in the runner/target flow
+- resets target memory between each prompt when `reset_memory_url` is configured
 
 ### PyRIT crescendo
 
 - multi-turn attack
 - keeps conversational context across turns
-- should **not** be reset between turns
+- does **not** reset between turns
 
 ### PyRIT red teaming
 

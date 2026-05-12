@@ -34,19 +34,17 @@ def load_campaign(yaml_path: str | Path) -> CampaignConfig:
     if not path.exists():
         raise FileNotFoundError(f"Campaign file not found: {path}")
 
-    # 1) Lire YAML campagne
+    # 1) Read and validate the campaign YAML
     raw = _read_yaml(path)
     _validate_top_level(raw, path)
 
-    # 2) Verifier target minimal
+    # 2) Parse and validate the target section
     target_cfg = _parse_target(raw["target"], path)
 
-    # 3) Charger les fichiers d'attaque
+    # 3) Load attack files and build Attack objects
     attacks = _load_attacks(raw.get("attacks"), path)
 
-    # 4) Instancier PyritAttack / GarakAttack (fait dans _load_attacks)
-
-    # 5) Retourner CampaignConfig
+    # 4) Return the fully resolved CampaignConfig
     campaign_meta = raw.get("campaign", {})
     logger.info(
         "Loaded campaign '%s' — %d attack(s) targeting '%s'",

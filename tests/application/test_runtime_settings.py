@@ -10,7 +10,6 @@ from settings import build_pyrit_attacker_config, get_runtime_settings
 
 # Minimal env vars always required
 _BASE_ENV = {
-    "DEFAULT_TARGET_URL": "http://localhost:8000/api/chat",
     "JSON_REPORTS_DIR": "reports",
 }
 
@@ -107,7 +106,6 @@ class RuntimeSettingsTests(unittest.TestCase):
             "PYRIT_SCORER_MODEL": "scorer-model",
             "PYRIT_SCORER_API_KEY": "scorer-secret",
             "PYRIT_DB_PATH": "/tmp/pyrit-test.db",
-            "DEFAULT_TARGET_URL": "https://target.example.test/api/chat",
             "JSON_REPORTS_DIR": "/tmp/json-reports",
             "GARAK_REPORTS_DIR": "/tmp/garak-runs",
             "GARAK_CONFIG_PATH": "/tmp/garak-config.json",
@@ -123,7 +121,6 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(settings.pyrit_scorer_model, "scorer-model")
         self.assertEqual(settings.pyrit_scorer_api_key, "scorer-secret")
         self.assertEqual(settings.pyrit_db_path, "/tmp/pyrit-test.db")
-        self.assertEqual(settings.default_target_url, "https://target.example.test/api/chat")
         self.assertEqual(settings.json_reports_dir, "/tmp/json-reports")
         self.assertEqual(settings.garak_reports_dir, "/tmp/garak-runs")
         self.assertEqual(settings.garak_config_path, "/tmp/garak-config.json")

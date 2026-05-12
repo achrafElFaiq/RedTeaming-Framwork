@@ -60,11 +60,11 @@ class PyritNormalizer(Normalizer):
 
                 if user_piece.role == "user" and assistant_piece.role == "assistant":
                     score = False
-                    rationale = "Aucun score trouvé."
+                    rationale = "No score found."
 
                     scores = memory.get_prompt_scores(prompt_ids=[assistant_piece.id])
                     if scores:
-                        score = scores[0].get_value() == True
+                        score = bool(scores[0].get_value())
                         rationale = scores[0].score_rationale
 
                     turns.append(ConversationTurn(
@@ -79,7 +79,6 @@ class PyritNormalizer(Normalizer):
                 else:
                     i += 1
 
-        #self._clear_db()
 
         conversation = Conversation(
             conversation_id=self.pyrit_result.conversation_id,
@@ -110,7 +109,6 @@ class PyritNormalizer(Normalizer):
                 turns=[]
             )
         )
-        #self._clear_db()
         return result
 
 

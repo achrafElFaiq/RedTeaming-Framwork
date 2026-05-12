@@ -159,11 +159,12 @@ def _check_pyrit_db(db_path: str) -> list[str]:
 # ─────────────────────────────────────────────────────────────────
 
 def _check_garak_available() -> list[str]:
-    """Check that garak is importable / installed."""
+    """Check that garak is importable and available in the current Python environment."""
     logger.info("[Preflight] Checking Garak availability")
     import subprocess
+    import sys
     result = subprocess.run(
-        ["python3", "-m", "garak", "--help"],
+        [sys.executable, "-m", "garak", "--help"],
         capture_output=True,
         text=True,
         timeout=15,

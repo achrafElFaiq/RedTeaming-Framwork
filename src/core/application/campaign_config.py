@@ -28,10 +28,6 @@ class CampaignConfig:
     target_input_field: str = "prompt"
     target_output_field: str = "response"
 
-    @property
-    def target_url(self) -> str:
-        """Backward-compat alias for older call sites."""
-        return self.target_chat_url
 
     def __post_init__(self):
         if not self.target_name.strip():

@@ -1,37 +1,37 @@
 # ═══════════════════════════════════════════════════════════════
-# TEMPLATE — Campagne Red Teaming
+# TEMPLATE — Red Teaming Campaign
 # ═══════════════════════════════════════════════════════════════
 #
-# Une campagne = une cible + une liste d'attaques du catalogue.
-# Chaque attaque est un chemin vers un fichier YAML.
+# A campaign = one target + a list of attacks from the catalog.
+# Each attack is a path to a YAML file.
 #
-# Usage :
-#   python main.py campaigns/ma_campagne.yaml
+# Usage:
+#   python main.py examples/campaigns/my_campaign/campaign.yaml
 #
-# Copier ce fichier dans campaigns/ et remplir les champs.
+# Copy this file into a new campaign folder and fill in the fields.
 # ═══════════════════════════════════════════════════════════════
 
-# ── Métadonnées (optionnel) ───────────────────────────────────
+# ── Metadata (optional) ──────────────────────────────────────
 campaign:
-  name: "REMPLACER — Nom de la campagne"
+  name: "REPLACE — Campaign name"
   description: >
-    REMPLACER — Description de ce que la campagne teste.
+    REPLACE — Description of what this campaign tests.
 
-# ── Cible à attaquer ─────────────────────────────────────────
+# ── Target to attack ─────────────────────────────────────────
 target:
-  name: "REMPLACER — Nom lisible de la cible"       # ex: "CustomerBot SIA"
-  model: "REMPLACER — Nom du modèle"               # ex: "gpt-4.1", "llama3.1", "customerbot-v2"
-  architecture_type: "REMPLACER — Type d'architecture"  # ex: "Bare chatbot", "RAG-connected bot"
-  chat_url: "http://localhost:8000/api/chat"        # endpoint HTTP qui reçoit les prompts
-  reset_memory_url: "http://localhost:8000/api/reset"  # optionnel (si la cible garde un contexte)
-  input_field: "prompt"                             # nom du champ d'entrée string
-  output_field: "response"                          # nom du champ de sortie JSON
+  name: "REPLACE — Human-readable target name"         # e.g. "CustomerBot SIA"
+  model: "REPLACE — Model name"                        # e.g. "gpt-4.1", "llama3.1", "customerbot-v2"
+  architecture_type: "REPLACE — Architecture type"     # e.g. "Bare chatbot", "RAG-connected bot"
+  chat_url: "http://localhost:8000/api/chat"            # HTTP endpoint that receives prompts
+  reset_memory_url: "http://localhost:8000/api/reset"   # optional (if the target keeps context)
+  input_field: "prompt"                                 # input string field name
+  output_field: "response"                              # output JSON field name
 
-# ── Attaques à exécuter (dans l'ordre) ───────────────────────
-# Chaque ligne est un chemin vers un fichier d'attaque YAML.
-# Les chemins sont relatifs à la racine du projet.
+# ── Attacks to execute (in order) ────────────────────────────
+# Each line is a path to an attack YAML file.
+# Paths are relative to the project root.
 attacks:
-  - attack_catalog/pyrit/REMPLACER.yaml
-  - attack_catalog/pyrit/REMPLACER.yaml
-  - attack_catalog/garak/REMPLACER.yaml
-  # Ajouter autant d'attaques que nécessaire...
+  - examples/attacks/R1-prompt-leakage/REPLACE.yaml
+  - examples/attacks/R1-prompt-leakage/REPLACE.yaml
+  - examples/attacks/R3-jailbreaking-guardrail-bypass/REPLACE.yaml
+  # Add as many attacks as needed...
